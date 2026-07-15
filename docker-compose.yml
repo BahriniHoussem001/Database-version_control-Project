@@ -1,0 +1,26 @@
+services:
+  oracle-db:
+    image: container-registry.oracle.com/database/free:latest
+    container_name: dbvc-oracle
+    ports:
+      - "1521:1521"
+      - "5500:5500"
+    environment:
+      ORACLE_PWD: Oracle123
+      ORACLE_CHARACTERSET: AL32UTF8
+    volumes:
+      - oracle-data:/opt/oracle/oradata
+    restart: unless-stopped
+
+  liquibase:
+    image: liquibase/liquibase:5.0.2
+    depends_on:
+      - oracle-db
+    volumes:
+      - ./liquibase/liquibase.properties:/liquibase/liquibase.properties
+      - ./liquibase/changelog:/liquibase/project/changelog
+      - ./drivers:/liquibase/drivers
+    entrypoint: ["liquibase"]
+
+volumes:
+  oracle-data:
