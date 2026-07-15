@@ -9,3 +9,8 @@ CREATE TABLE CUSTOMER (
 );
 
 --rollback DROP TABLE CUSTOMER;
+
+--changeset houssem:V002-add-phone-number-to-customer
+ALTER TABLE CUSTOMER ADD PHONE_NUMBER VARCHAR2(20);
+
+--rollback ALTER TABLE CUSTOMER DROP COLUMN PHONE_NUMBER;
