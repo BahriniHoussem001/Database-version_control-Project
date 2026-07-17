@@ -21,3 +21,13 @@ oracle-data/
 
 # Java / JDBC driver files
 drivers/*.jar
+
+# Backend Gradle generated files
+backend/.gradle/
+backend/build/
+backend/bin/
+
+# Eclipse project files
+backend/.classpath
+backend/.project
+backend/.settings/
