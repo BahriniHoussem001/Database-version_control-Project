@@ -1,6 +1,7 @@
 package com.dbvc.controller;
 
 import com.dbvc.dto.MigrationHistoryItem;
+import com.dbvc.dto.MigrationSummaryResponse;
 import com.dbvc.service.MigrationHistoryService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -19,5 +20,9 @@ public class MigrationHistoryController {
     @GetMapping("/api/migrations/history")
     public List<MigrationHistoryItem> getMigrationHistory() {
         return migrationHistoryService.findAll();
+    }
+    @GetMapping("/api/migrations/summary")
+    public MigrationSummaryResponse getMigrationSummary() {
+        return migrationHistoryService.getSummary();
     }
 }
