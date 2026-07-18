@@ -1,6 +1,7 @@
 package com.dbvc.controller;
 
 import com.dbvc.dto.MigrationHistoryItem;
+import com.dbvc.dto.PendingMigrationItem;
 import com.dbvc.dto.MigrationSummaryResponse;
 import com.dbvc.service.MigrationHistoryService;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,5 +25,9 @@ public class MigrationHistoryController {
     @GetMapping("/api/migrations/summary")
     public MigrationSummaryResponse getMigrationSummary() {
         return migrationHistoryService.getSummary();
+    }
+    @GetMapping("/api/migrations/pending")
+    public List<PendingMigrationItem> getPendingMigrations() {
+        return migrationHistoryService.findPendingMigrations();
     }
 }
