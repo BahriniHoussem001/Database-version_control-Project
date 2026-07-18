@@ -30,4 +30,5 @@ public class MigrationHistoryController {
     public List<PendingMigrationItem> getPendingMigrations() {
         return migrationHistoryService.findPendingMigrations();
     }
+    
 }
