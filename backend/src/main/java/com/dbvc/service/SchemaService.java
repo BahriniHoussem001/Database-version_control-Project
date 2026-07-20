@@ -7,6 +7,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import com.dbvc.dto.SchemaTableItem;
+import com.dbvc.dto.SchemaSummaryResponse;
 
 @Service
 public class SchemaService {
@@ -64,5 +65,55 @@ public class SchemaService {
                 .columnId(rs.getInt("column_id"))
                 .defaultValue(null)
                 .build(), tableName);
+    }
+    public SchemaSummaryResponse getSchemaSummary() {
+        Integer totalTables = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM user_objects
+                WHERE object_type = 'TABLE'
+                """,
+                Integer.class
+        );
+
+        Integer totalColumns = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM user_tab_columns
+                """,
+                Integer.class
+        );
+
+        String latestTableSql = """
+                SELECT object_name, last_ddl_time
+                FROM user_objects
+                WHERE object_type = 'TABLE'
+                ORDER BY last_ddl_time DESC
+                FETCH FIRST 1 ROWS ONLY
+                """;
+
+        return jdbcTemplate.query(latestTableSql, rs -> {
+            if (rs.next()) {
+                return SchemaSummaryResponse.builder()
+                        .totalTables(totalTables != null ? totalTables : 0)
+                        .totalColumns(totalColumns != null ? totalColumns : 0)
+                        .latestChangedTable(rs.getString("object_name"))
+                        .latestDdlTime(
+                                rs.getTimestamp("last_ddl_time") != null
+                                        ? rs.getTimestamp("last_ddl_time").toLocalDateTime()
+                                        : null
+                        )
+                        .status("READABLE")
+                        .build();
+            }
+
+            return SchemaSummaryResponse.builder()
+                    .totalTables(0)
+                    .totalColumns(0)
+                    .latestChangedTable(null)
+                    .latestDdlTime(null)
+                    .status("EMPTY_SCHEMA")
+                    .build();
+        });
     }
 }

@@ -9,6 +9,7 @@ import com.dbvc.dto.SchemaTableItem;
 import com.dbvc.service.SchemaService;
 import com.dbvc.dto.SchemaColumnItem;
 import org.springframework.web.bind.annotation.PathVariable;
+import com.dbvc.dto.SchemaSummaryResponse;
 
 @RestController
 public class SchemaController {
@@ -26,5 +27,9 @@ public class SchemaController {
     @GetMapping("/api/schema/tables/{tableName}/columns")
     public List<SchemaColumnItem> getTableColumns(@PathVariable("tableName") String tableName) {
         return schemaService.findColumnsByTableName(tableName);
+    }
+    @GetMapping("/api/schema/summary")
+    public SchemaSummaryResponse getSchemaSummary() {
+        return schemaService.getSchemaSummary();
     }
 }
