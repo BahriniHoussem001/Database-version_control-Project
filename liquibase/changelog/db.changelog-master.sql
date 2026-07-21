@@ -25,3 +25,8 @@ CREATE TABLE PRODUCT (
 );
 
 --rollback DROP TABLE PRODUCT;
+
+--changeset houssem:V004-add-sku-to-product
+ALTER TABLE PRODUCT ADD SKU VARCHAR2(50);
+
+--rollback ALTER TABLE PRODUCT DROP COLUMN SKU;

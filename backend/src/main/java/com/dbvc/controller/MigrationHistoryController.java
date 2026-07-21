@@ -1,6 +1,11 @@
 package com.dbvc.controller;
 
 import com.dbvc.dto.MigrationHistoryItem;
+
+
+import com.dbvc.dto.MigrationValidationResult;
+import com.dbvc.service.MigrationValidationService;
+
 import com.dbvc.dto.PendingMigrationItem;
 import com.dbvc.dto.MigrationSummaryResponse;
 import com.dbvc.service.MigrationHistoryService;
@@ -12,12 +17,17 @@ import java.util.List;
 @RestController
 public class MigrationHistoryController {
 
-    private final MigrationHistoryService migrationHistoryService;
+	private final MigrationHistoryService migrationHistoryService;
+	private final MigrationValidationService migrationValidationService;
 
-    public MigrationHistoryController(MigrationHistoryService migrationHistoryService) {
-        this.migrationHistoryService = migrationHistoryService;
-    }
-
+	public MigrationHistoryController(
+	        MigrationHistoryService migrationHistoryService,
+	        MigrationValidationService migrationValidationService
+	) {
+	    this.migrationHistoryService = migrationHistoryService;
+	    this.migrationValidationService = migrationValidationService;
+	}
+	
     @GetMapping("/api/migrations/history")
     public List<MigrationHistoryItem> getMigrationHistory() {
         return migrationHistoryService.findAll();
@@ -30,5 +40,8 @@ public class MigrationHistoryController {
     public List<PendingMigrationItem> getPendingMigrations() {
         return migrationHistoryService.findPendingMigrations();
     }
-    
+    @GetMapping("/api/migrations/pending/validation")
+    public List<MigrationValidationResult> validatePendingMigrations() {
+        return migrationValidationService.validatePendingMigrations();
+    }
 }
