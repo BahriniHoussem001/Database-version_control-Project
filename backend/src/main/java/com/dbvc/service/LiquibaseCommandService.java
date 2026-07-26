@@ -25,10 +25,12 @@ public class LiquibaseCommandService {
 
             processBuilder.directory(new File(projectRoot));
 
+            // Merge normal output and Docker logs into one stream
+            processBuilder.redirectErrorStream(true);
+
             Process process = processBuilder.start();
 
             String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            String error = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
 
             int exitCode = process.waitFor();
 
@@ -37,7 +39,7 @@ public class LiquibaseCommandService {
                     .command(command)
                     .exitCode(exitCode)
                     .output(output)
-                    .error(error.isBlank() ? null : error)
+                    .error(exitCode == 0 ? null : output)
                     .build();
 
         } catch (Exception e) {
