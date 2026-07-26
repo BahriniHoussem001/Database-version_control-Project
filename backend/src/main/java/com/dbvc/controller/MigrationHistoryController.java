@@ -70,5 +70,8 @@ public class MigrationHistoryController {
 
         return liquibaseCommandService.runUpdate();
     }
-    
+    @GetMapping("/api/migrations/rollback/preview")
+    public LiquibaseExecutionResult previewRollbackLastMigration() {
+        return liquibaseCommandService.previewRollbackLastChangeset();
+    }
 }

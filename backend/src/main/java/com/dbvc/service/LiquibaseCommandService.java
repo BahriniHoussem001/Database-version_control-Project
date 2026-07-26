@@ -52,4 +52,41 @@ public class LiquibaseCommandService {
                     .build();
         }
     }
+    public LiquibaseExecutionResult previewRollbackLastChangeset() {
+        String command = "docker compose run --rm liquibase rollback-count-sql --count=1";
+
+        try {
+            ProcessBuilder processBuilder = new ProcessBuilder(
+                    "cmd.exe",
+                    "/c",
+                    command
+            );
+
+            processBuilder.directory(new File(projectRoot));
+            processBuilder.redirectErrorStream(true);
+
+            Process process = processBuilder.start();
+
+            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+
+            int exitCode = process.waitFor();
+
+            return LiquibaseExecutionResult.builder()
+                    .success(exitCode == 0)
+                    .command(command)
+                    .exitCode(exitCode)
+                    .output(output)
+                    .error(exitCode == 0 ? null : output)
+                    .build();
+
+        } catch (Exception e) {
+            return LiquibaseExecutionResult.builder()
+                    .success(false)
+                    .command(command)
+                    .exitCode(-1)
+                    .output(null)
+                    .error(e.getMessage())
+                    .build();
+        }
+    }
 }
