@@ -74,4 +74,8 @@ public class MigrationHistoryController {
     public LiquibaseExecutionResult previewRollbackLastMigration() {
         return liquibaseCommandService.previewRollbackLastChangeset();
     }
+    @PostMapping("/api/migrations/rollback")
+    public LiquibaseExecutionResult rollbackLastMigration() {
+        return liquibaseCommandService.rollbackLastChangeset();
+    }
 }
