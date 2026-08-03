@@ -110,29 +110,27 @@ public class MigrationValidationService {
             issues.add("Rollback instruction is required");
         }
 
-        String sql = String.join(" ", changeset.sqlLines()).toUpperCase();
+        String sql = normalizeSql(String.join(" ", changeset.sqlLines()));
 
-        if (sql.contains("DROP TABLE")) {
+        if (matchesSqlPattern(sql, "\\bDROP\\s+TABLE\\b")) {
             issues.add("Dangerous operation detected: DROP TABLE");
         }
 
-        if (sql.contains("DROP COLUMN")) {
+        if (matchesSqlPattern(sql, "\\bDROP\\s+COLUMN\\b")) {
             issues.add("Dangerous operation detected: DROP COLUMN");
         }
 
-        if (sql.contains("TRUNCATE TABLE")) {
+        if (matchesSqlPattern(sql, "\\bTRUNCATE\\s+TABLE\\b")) {
             issues.add("Dangerous operation detected: TRUNCATE TABLE");
         }
 
-        if (sql.contains("DELETE FROM")) {
+        if (matchesSqlPattern(sql, "\\bDELETE\\s+FROM\\b")) {
             issues.add("Dangerous operation detected: DELETE FROM");
         }
 
-        if (sql.contains("ALTER TABLE") && sql.contains("MODIFY")) {
+        if (matchesSqlPattern(sql, "\\bALTER\\s+TABLE\\b.*\\bMODIFY\\b")) {
             issues.add("Potentially risky operation detected: ALTER TABLE MODIFY");
-        }
-
-        String status = issues.isEmpty() ? "VALID" : "WARNING";
+        }        String status = issues.isEmpty() ? "VALID" : "WARNING";
 
         if ("INVALID_CHANGESET_FORMAT".equals(changeset.id())) {
             status = "INVALID";
@@ -152,6 +150,18 @@ public class MigrationValidationService {
             List<String> sqlLines,
             boolean hasRollback
     ) {
+    }
+    private String normalizeSql(String sql) {
+        return sql
+                .replaceAll("\\s+", " ")
+                .trim()
+                .toUpperCase();
+    }
+
+    private boolean matchesSqlPattern(String sql, String regex) {
+        return Pattern.compile(regex, Pattern.CASE_INSENSITIVE)
+                .matcher(sql)
+                .find();
     }
 }
 
