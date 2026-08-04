@@ -36,4 +36,8 @@ public class MigrationExecutionController {
     public MigrationExecutionResponse getExecutionRequestById(@PathVariable("id") Long id) {
         return migrationExecutionService.findById(id);
     }
+    @PostMapping("/api/migration-executions/process-next")
+    public MigrationExecutionResponse processNextQueuedRequest() {
+        return migrationExecutionService.processNextQueuedRequest();
+    }
 }

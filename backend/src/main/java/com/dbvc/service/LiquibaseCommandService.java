@@ -90,6 +90,28 @@ public class LiquibaseCommandService {
         }
     }
     public LiquibaseExecutionResult rollbackLastChangeset() {
+        LiquibaseExecutionResult previewResult = previewRollbackLastChangeset();
+
+        if (!previewResult.isSuccess()) {
+            return LiquibaseExecutionResult.builder()
+                    .success(false)
+                    .command("docker compose run --rm liquibase rollback-count --count=1")
+                    .exitCode(-1)
+                    .output(previewResult.getOutput())
+                    .error("Rollback preview failed. Real rollback was not executed.")
+                    .build();
+        }
+
+        if (isRollbackTouchingProtectedTables(previewResult.getOutput())) {
+            return LiquibaseExecutionResult.builder()
+                    .success(false)
+                    .command("docker compose run --rm liquibase rollback-count --count=1")
+                    .exitCode(-1)
+                    .output(previewResult.getOutput())
+                    .error("Rollback blocked because it would affect DBVC internal tables.")
+                    .build();
+        }
+
         String command = "docker compose run --rm liquibase rollback-count --count=1";
 
         try {
@@ -125,5 +147,17 @@ public class LiquibaseCommandService {
                     .error(e.getMessage())
                     .build();
         }
+    }
+    private boolean isRollbackTouchingProtectedTables(String rollbackPreviewOutput) {
+        if (rollbackPreviewOutput == null) {
+            return false;
+        }
+
+        String normalizedOutput = rollbackPreviewOutput
+                .replaceAll("\\s+", " ")
+                .trim()
+                .toUpperCase();
+
+        return normalizedOutput.contains("MIGRATION_EXECUTION_REQUEST");
     }
 }
