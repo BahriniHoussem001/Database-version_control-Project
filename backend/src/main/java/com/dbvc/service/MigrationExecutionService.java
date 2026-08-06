@@ -12,7 +12,7 @@ import org.springframework.stereotype.Service;
 import java.sql.PreparedStatement;
 import java.sql.Timestamp;
 import java.util.List;
-
+import com.dbvc.dto.MigrationExecutionSummaryResponse;
 @Service
 public class MigrationExecutionService {
 	private final LiquibaseCommandService liquibaseCommandService;
@@ -355,5 +355,76 @@ public class MigrationExecutionService {
 
         return processNextQueuedRequest();
     }
+    public MigrationExecutionSummaryResponse getExecutionSummary() {
+        Integer totalRequests = countRequestsByStatus(null);
+        Integer queuedRequests = countRequestsByStatus("QUEUED");
+        Integer runningRequests = countRequestsByStatus("RUNNING");
+        Integer successfulRequests = countRequestsByStatus("SUCCESS");
+        Integer failedRequests = countRequestsByStatus("FAILED");
+
+        String latestSql = """
+                SELECT id,
+                       request_type,
+                       status,
+                       priority,
+                       requested_at,
+                       finished_at
+                FROM migration_execution_request
+                ORDER BY requested_at DESC
+                FETCH FIRST 1 ROWS ONLY
+                """;
+
+        return jdbcTemplate.query(latestSql, rs -> {
+            if (rs.next()) {
+                return MigrationExecutionSummaryResponse.builder()
+                        .totalRequests(totalRequests != null ? totalRequests : 0)
+                        .queuedRequests(queuedRequests != null ? queuedRequests : 0)
+                        .runningRequests(runningRequests != null ? runningRequests : 0)
+                        .successfulRequests(successfulRequests != null ? successfulRequests : 0)
+                        .failedRequests(failedRequests != null ? failedRequests : 0)
+                        .latestRequestId(rs.getLong("id"))
+                        .latestRequestType(rs.getString("request_type"))
+                        .latestStatus(rs.getString("status"))
+                        .latestPriority(rs.getString("priority"))
+                        .latestRequestedAt(toLocalDateTime(rs.getTimestamp("requested_at")))
+                        .latestFinishedAt(toLocalDateTime(rs.getTimestamp("finished_at")))
+                        .build();
+            }
+
+            return MigrationExecutionSummaryResponse.builder()
+                    .totalRequests(0)
+                    .queuedRequests(0)
+                    .runningRequests(0)
+                    .successfulRequests(0)
+                    .failedRequests(0)
+                    .latestRequestId(null)
+                    .latestRequestType(null)
+                    .latestStatus(null)
+                    .latestPriority(null)
+                    .latestRequestedAt(null)
+                    .latestFinishedAt(null)
+                    .build();
+        });
+    }
+    private Integer countRequestsByStatus(String status) {
+        if (status == null) {
+            return jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM migration_execution_request",
+                    Integer.class
+            );
+        }
+
+        return jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM migration_execution_request
+                WHERE status = ?
+                """,
+                Integer.class,
+                status
+        );
+    }
+    
+    
   }
     

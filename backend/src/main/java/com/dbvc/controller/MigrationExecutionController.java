@@ -1,6 +1,7 @@
 package com.dbvc.controller;
 
 import com.dbvc.dto.CreateMigrationExecutionRequest;
+import com.dbvc.dto.MigrationExecutionSummaryResponse;
 import com.dbvc.dto.MigrationExecutionResponse;
 import com.dbvc.service.MigrationExecutionService;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -40,4 +41,9 @@ public class MigrationExecutionController {
     public MigrationExecutionResponse processNextQueuedRequest() {
         return migrationExecutionService.processNextQueuedRequest();
     }
+    @GetMapping("/api/migration-executions/summary")
+    public MigrationExecutionSummaryResponse getExecutionSummary() {
+        return migrationExecutionService.getExecutionSummary();
+    }
+    
 }
