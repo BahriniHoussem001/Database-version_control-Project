@@ -333,6 +333,27 @@ public class MigrationExecutionService {
 
         throw new IllegalArgumentException("Unsupported request type: " + request.getRequestType());
     }
-    
+    public MigrationExecutionResponse processNextQueuedRequestIfAvailable() {
+        Integer runningCount = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM migration_execution_request
+                WHERE status = 'RUNNING'
+                """,
+                Integer.class
+        );
+
+        if (runningCount != null && runningCount > 0) {
+            return null;
+        }
+
+        Long nextRequestId = findNextQueuedRequestId();
+
+        if (nextRequestId == null) {
+            return null;
+        }
+
+        return processNextQueuedRequest();
+    }
   }
     
