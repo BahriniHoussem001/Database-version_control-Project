@@ -17,8 +17,7 @@ services:
     depends_on:
       - oracle-db
     volumes:
-      - ./liquibase/liquibase.properties:/liquibase/liquibase.properties
-      - ./liquibase/changelog:/liquibase/project/changelog
+      - ./liquibase:/liquibase/project
       - ./drivers:/liquibase/drivers
     entrypoint: ["liquibase"]
 
