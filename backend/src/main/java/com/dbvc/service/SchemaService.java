@@ -1,47 +1,88 @@
 package com.dbvc.service;
 
-import java.util.List;
 import com.dbvc.dto.SchemaColumnItem;
+import com.dbvc.dto.SchemaSummaryResponse;
+import com.dbvc.dto.SchemaTableItem;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
-import com.dbvc.dto.SchemaTableItem;
-import com.dbvc.dto.SchemaSummaryResponse;
+import java.sql.Timestamp;
+import java.util.List;
 
 @Service
 public class SchemaService {
 
     private final JdbcTemplate jdbcTemplate;
+    private final EnvironmentJdbcTemplateProvider environmentJdbcTemplateProvider;
 
-    public SchemaService(JdbcTemplate jdbcTemplate) {
+    public SchemaService(
+            JdbcTemplate jdbcTemplate,
+            EnvironmentJdbcTemplateProvider environmentJdbcTemplateProvider
+    ) {
         this.jdbcTemplate = jdbcTemplate;
+        this.environmentJdbcTemplateProvider = environmentJdbcTemplateProvider;
     }
 
     public List<SchemaTableItem> findAllTables() {
+        return findAllTablesUsingJdbcTemplate(jdbcTemplate);
+    }
+
+    public List<SchemaTableItem> findAllTablesByEnvironment(String environment) {
+        JdbcTemplate environmentJdbcTemplate =
+                environmentJdbcTemplateProvider.getJdbcTemplate(environment);
+
+        return findAllTablesUsingJdbcTemplate(environmentJdbcTemplate);
+    }
+
+    public List<SchemaColumnItem> findColumnsByTableName(String tableName) {
+        return findColumnsByTableNameUsingJdbcTemplate(jdbcTemplate, tableName);
+    }
+
+    public List<SchemaColumnItem> findColumnsByTableNameAndEnvironment(
+            String environment,
+            String tableName
+    ) {
+        JdbcTemplate environmentJdbcTemplate =
+                environmentJdbcTemplateProvider.getJdbcTemplate(environment);
+
+        return findColumnsByTableNameUsingJdbcTemplate(environmentJdbcTemplate, tableName);
+    }
+
+    public SchemaSummaryResponse getSchemaSummary() {
+        return getSchemaSummaryUsingJdbcTemplate(jdbcTemplate);
+    }
+
+    public SchemaSummaryResponse getSchemaSummaryByEnvironment(String environment) {
+        JdbcTemplate environmentJdbcTemplate =
+                environmentJdbcTemplateProvider.getJdbcTemplate(environment);
+
+        return getSchemaSummaryUsingJdbcTemplate(environmentJdbcTemplate);
+    }
+
+    private List<SchemaTableItem> findAllTablesUsingJdbcTemplate(JdbcTemplate targetJdbcTemplate) {
         String sql = """
-                SELECT object_name, created, last_ddl_time, status
+                SELECT object_name,
+                       created,
+                       last_ddl_time,
+                       status
                 FROM user_objects
                 WHERE object_type = 'TABLE'
                 ORDER BY object_name
                 """;
 
-        return jdbcTemplate.query(sql, (rs, rowNum) -> SchemaTableItem.builder()
+        return targetJdbcTemplate.query(sql, (rs, rowNum) -> SchemaTableItem.builder()
                 .tableName(rs.getString("object_name"))
-                .createdAt(
-                        rs.getTimestamp("created") != null
-                                ? rs.getTimestamp("created").toLocalDateTime()
-                                : null
-                )
-                .lastDdlTime(
-                        rs.getTimestamp("last_ddl_time") != null
-                                ? rs.getTimestamp("last_ddl_time").toLocalDateTime()
-                                : null
-                )
+                .createdAt(toLocalDateTime(rs.getTimestamp("created")))
+                .lastDdlTime(toLocalDateTime(rs.getTimestamp("last_ddl_time")))
                 .status(rs.getString("status"))
                 .build());
     }
-    public List<SchemaColumnItem> findColumnsByTableName(String tableName) {
+
+    private List<SchemaColumnItem> findColumnsByTableNameUsingJdbcTemplate(
+            JdbcTemplate targetJdbcTemplate,
+            String tableName
+    ) {
         String sql = """
                 SELECT column_name,
                        data_type,
@@ -55,7 +96,7 @@ public class SchemaService {
                 ORDER BY column_id
                 """;
 
-        return jdbcTemplate.query(sql, (rs, rowNum) -> SchemaColumnItem.builder()
+        return targetJdbcTemplate.query(sql, (rs, rowNum) -> SchemaColumnItem.builder()
                 .columnName(rs.getString("column_name"))
                 .dataType(rs.getString("data_type"))
                 .dataLength(rs.getInt("data_length"))
@@ -66,8 +107,9 @@ public class SchemaService {
                 .defaultValue(null)
                 .build(), tableName);
     }
-    public SchemaSummaryResponse getSchemaSummary() {
-        Integer totalTables = jdbcTemplate.queryForObject(
+
+    private SchemaSummaryResponse getSchemaSummaryUsingJdbcTemplate(JdbcTemplate targetJdbcTemplate) {
+        Integer totalTables = targetJdbcTemplate.queryForObject(
                 """
                 SELECT COUNT(*)
                 FROM user_objects
@@ -76,7 +118,7 @@ public class SchemaService {
                 Integer.class
         );
 
-        Integer totalColumns = jdbcTemplate.queryForObject(
+        Integer totalColumns = targetJdbcTemplate.queryForObject(
                 """
                 SELECT COUNT(*)
                 FROM user_tab_columns
@@ -85,24 +127,21 @@ public class SchemaService {
         );
 
         String latestTableSql = """
-                SELECT object_name, last_ddl_time
+                SELECT object_name,
+                       last_ddl_time
                 FROM user_objects
                 WHERE object_type = 'TABLE'
                 ORDER BY last_ddl_time DESC
                 FETCH FIRST 1 ROWS ONLY
                 """;
 
-        return jdbcTemplate.query(latestTableSql, rs -> {
+        return targetJdbcTemplate.query(latestTableSql, rs -> {
             if (rs.next()) {
                 return SchemaSummaryResponse.builder()
                         .totalTables(totalTables != null ? totalTables : 0)
                         .totalColumns(totalColumns != null ? totalColumns : 0)
                         .latestChangedTable(rs.getString("object_name"))
-                        .latestDdlTime(
-                                rs.getTimestamp("last_ddl_time") != null
-                                        ? rs.getTimestamp("last_ddl_time").toLocalDateTime()
-                                        : null
-                        )
+                        .latestDdlTime(toLocalDateTime(rs.getTimestamp("last_ddl_time")))
                         .status("READABLE")
                         .build();
             }
@@ -115,5 +154,9 @@ public class SchemaService {
                     .status("EMPTY_SCHEMA")
                     .build();
         });
+    }
+
+    private java.time.LocalDateTime toLocalDateTime(Timestamp timestamp) {
+        return timestamp != null ? timestamp.toLocalDateTime() : null;
     }
 }
