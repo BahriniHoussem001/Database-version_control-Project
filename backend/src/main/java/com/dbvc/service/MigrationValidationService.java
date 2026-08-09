@@ -1,6 +1,7 @@
 package com.dbvc.service;
 
 import com.dbvc.dto.MigrationValidationResult;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -15,28 +16,55 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import org.springframework.stereotype.Service;
-
 @Service
 public class MigrationValidationService {
-	private final JdbcTemplate jdbcTemplate;
+
+    private final JdbcTemplate jdbcTemplate;
+    private final EnvironmentJdbcTemplateProvider environmentJdbcTemplateProvider;
 
     @Value("${dbvc.liquibase.changelog-path}")
     private String changelogPath;
 
-    public MigrationValidationService(JdbcTemplate jdbcTemplate) {
+    @Value("${dbvc.liquibase.application-changelog-path:../liquibase/changelog/db.application-changelog-master.sql}")
+    private String applicationChangelogPath;
+
+    public MigrationValidationService(
+            JdbcTemplate jdbcTemplate,
+            EnvironmentJdbcTemplateProvider environmentJdbcTemplateProvider
+    ) {
         this.jdbcTemplate = jdbcTemplate;
+        this.environmentJdbcTemplateProvider = environmentJdbcTemplateProvider;
     }
 
     public List<MigrationValidationResult> validatePendingMigrations() {
-        Set<String> executedChangesets = jdbcTemplate.queryForList(
+        return validatePendingMigrationsUsingJdbcTemplate(
+                jdbcTemplate,
+                changelogPath
+        );
+    }
+
+    public List<MigrationValidationResult> validatePendingMigrationsByEnvironment(String environment) {
+        JdbcTemplate environmentJdbcTemplate =
+                environmentJdbcTemplateProvider.getJdbcTemplate(environment);
+
+        return validatePendingMigrationsUsingJdbcTemplate(
+                environmentJdbcTemplate,
+                applicationChangelogPath
+        );
+    }
+
+    private List<MigrationValidationResult> validatePendingMigrationsUsingJdbcTemplate(
+            JdbcTemplate targetJdbcTemplate,
+            String targetChangelogPath
+    ) {
+        Set<String> executedChangesets = targetJdbcTemplate.queryForList(
                         "SELECT id || '::' || author FROM databasechangelog",
                         String.class
                 )
                 .stream()
                 .collect(Collectors.toSet());
 
-        List<ParsedChangeset> changesets = parseChangesets();
+        List<ParsedChangeset> changesets = parseChangesets(targetChangelogPath);
 
         return changesets.stream()
                 .filter(changeset -> !executedChangesets.contains(changeset.id() + "::" + changeset.author()))
@@ -44,11 +72,11 @@ public class MigrationValidationService {
                 .toList();
     }
 
-    private List<ParsedChangeset> parseChangesets() {
+    private List<ParsedChangeset> parseChangesets(String targetChangelogPath) {
         Pattern changesetPattern = Pattern.compile("^--changeset\\s+([^:]+):(.+)$");
 
         try {
-            List<String> lines = Files.readAllLines(Path.of(changelogPath));
+            List<String> lines = Files.readAllLines(Path.of(targetChangelogPath));
             List<ParsedChangeset> changesets = new ArrayList<>();
 
             String currentAuthor = null;
@@ -95,7 +123,10 @@ public class MigrationValidationService {
             return changesets;
 
         } catch (IOException e) {
-            throw new IllegalStateException("Unable to read Liquibase changelog file: " + changelogPath, e);
+            throw new IllegalStateException(
+                    "Unable to read Liquibase changelog file: " + targetChangelogPath,
+                    e
+            );
         }
     }
 
@@ -130,7 +161,9 @@ public class MigrationValidationService {
 
         if (matchesSqlPattern(sql, "\\bALTER\\s+TABLE\\b.*\\bMODIFY\\b")) {
             issues.add("Potentially risky operation detected: ALTER TABLE MODIFY");
-        }        String status = issues.isEmpty() ? "VALID" : "WARNING";
+        }
+
+        String status = issues.isEmpty() ? "VALID" : "WARNING";
 
         if ("INVALID_CHANGESET_FORMAT".equals(changeset.id())) {
             status = "INVALID";
@@ -144,13 +177,6 @@ public class MigrationValidationService {
                 .build();
     }
 
-    private record ParsedChangeset(
-            String id,
-            String author,
-            List<String> sqlLines,
-            boolean hasRollback
-    ) {
-    }
     private String normalizeSql(String sql) {
         return sql
                 .replaceAll("\\s+", " ")
@@ -163,6 +189,12 @@ public class MigrationValidationService {
                 .matcher(sql)
                 .find();
     }
+
+    private record ParsedChangeset(
+            String id,
+            String author,
+            List<String> sqlLines,
+            boolean hasRollback
+    ) {
+    }
 }
-
-

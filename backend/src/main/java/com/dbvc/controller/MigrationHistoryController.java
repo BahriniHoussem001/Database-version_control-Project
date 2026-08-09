@@ -105,4 +105,10 @@ public class MigrationHistoryController {
     ) {
         return migrationHistoryService.findPendingMigrationsByEnvironment(environment);
     }
+    @GetMapping("/api/environments/{environment}/migrations/pending/validation")
+    public List<MigrationValidationResult> validateEnvironmentPendingMigrations(
+            @PathVariable("environment") String environment
+    ) {
+        return migrationValidationService.validatePendingMigrationsByEnvironment(environment);
+    }
 }

@@ -4,6 +4,7 @@ import com.dbvc.dto.CreateMigrationExecutionRequest;
 import com.dbvc.dto.LiquibaseExecutionResult;
 import com.dbvc.dto.MigrationExecutionResponse;
 import com.dbvc.dto.MigrationExecutionSummaryResponse;
+import com.dbvc.dto.MigrationValidationResult;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -21,12 +22,17 @@ import java.util.List;
 public class MigrationExecutionService {
 
     private final JdbcTemplate jdbcTemplate;
+    private final MigrationValidationService migrationValidationService;
 
     @Value("${dbvc.project-root}")
     private String projectRoot;
 
-    public MigrationExecutionService(JdbcTemplate jdbcTemplate) {
+    public MigrationExecutionService(
+            JdbcTemplate jdbcTemplate,
+            MigrationValidationService migrationValidationService
+    ) {
         this.jdbcTemplate = jdbcTemplate;
+        this.migrationValidationService = migrationValidationService;
     }
 
     public MigrationExecutionResponse createExecutionRequest(CreateMigrationExecutionRequest request) {
@@ -330,7 +336,26 @@ public class MigrationExecutionService {
                     + " on environment: " + request.getEnvironment();
         }
 
-        return "Validation passed before execution for environment: " + request.getEnvironment();
+        List<MigrationValidationResult> validationResults =
+                migrationValidationService.validatePendingMigrationsByEnvironment(request.getEnvironment());
+
+        boolean hasValidationProblems = validationResults.stream()
+                .anyMatch(result -> !"VALID".equals(result.getStatus()));
+
+        if (hasValidationProblems) {
+            throw new IllegalStateException(
+                    "Migration validation failed for environment: "
+                            + request.getEnvironment()
+                            + ". Please check /api/environments/"
+                            + request.getEnvironment()
+                            + "/migrations/pending/validation before applying."
+            );
+        }
+
+        return "Validation passed before execution for environment: "
+                + request.getEnvironment()
+                + ". Pending changesets checked: "
+                + validationResults.size();
     }
 
     private LiquibaseExecutionResult executeRequest(MigrationExecutionResponse request) {
