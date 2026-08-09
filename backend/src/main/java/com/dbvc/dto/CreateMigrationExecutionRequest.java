@@ -10,9 +10,11 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @NoArgsConstructor
 public class CreateMigrationExecutionRequest {
+	private String environment;
 	private String requestType;
 	private String priority;
 	private String reason;
 	private String requestedBy;
+	
 
 }

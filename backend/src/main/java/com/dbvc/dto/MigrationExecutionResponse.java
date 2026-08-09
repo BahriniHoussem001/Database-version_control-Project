@@ -14,7 +14,8 @@ import lombok.NoArgsConstructor;
 
 public class MigrationExecutionResponse {
 	 private Long id;
-
+	 
+	    private String environment;
 	    private String requestType;
 	    private String priority;
 	    private String reason;
