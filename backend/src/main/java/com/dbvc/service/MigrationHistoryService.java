@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.Timestamp;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -21,36 +22,86 @@ import java.util.stream.Collectors;
 public class MigrationHistoryService {
 
     private final JdbcTemplate jdbcTemplate;
+    private final EnvironmentJdbcTemplateProvider environmentJdbcTemplateProvider;
 
     @Value("${dbvc.liquibase.changelog-path}")
     private String changelogPath;
 
-    public MigrationHistoryService(JdbcTemplate jdbcTemplate) {
+    @Value("${dbvc.liquibase.application-changelog-path:../liquibase/changelog/db.application-changelog-master.sql}")
+    private String applicationChangelogPath;
+
+    public MigrationHistoryService(
+            JdbcTemplate jdbcTemplate,
+            EnvironmentJdbcTemplateProvider environmentJdbcTemplateProvider
+    ) {
         this.jdbcTemplate = jdbcTemplate;
+        this.environmentJdbcTemplateProvider = environmentJdbcTemplateProvider;
     }
 
     public List<MigrationHistoryItem> findAll() {
+        return findHistoryUsingJdbcTemplate(jdbcTemplate);
+    }
+
+    public List<MigrationHistoryItem> findAllByEnvironment(String environment) {
+        JdbcTemplate environmentJdbcTemplate =
+                environmentJdbcTemplateProvider.getJdbcTemplate(environment);
+
+        return findHistoryUsingJdbcTemplate(environmentJdbcTemplate);
+    }
+
+    public MigrationSummaryResponse getSummary() {
+        return getSummaryUsingJdbcTemplate(jdbcTemplate);
+    }
+
+    public MigrationSummaryResponse getSummaryByEnvironment(String environment) {
+        JdbcTemplate environmentJdbcTemplate =
+                environmentJdbcTemplateProvider.getJdbcTemplate(environment);
+
+        return getSummaryUsingJdbcTemplate(environmentJdbcTemplate);
+    }
+
+    public List<PendingMigrationItem> findPendingMigrations() {
+        return findPendingMigrationsUsingJdbcTemplate(
+                jdbcTemplate,
+                changelogPath,
+                "project/changelog/db.changelog-master.sql"
+        );
+    }
+
+    public List<PendingMigrationItem> findPendingMigrationsByEnvironment(String environment) {
+        JdbcTemplate environmentJdbcTemplate =
+                environmentJdbcTemplateProvider.getJdbcTemplate(environment);
+
+        return findPendingMigrationsUsingJdbcTemplate(
+                environmentJdbcTemplate,
+                applicationChangelogPath,
+                "project/changelog/db.application-changelog-master.sql"
+        );
+    }
+
+    private List<MigrationHistoryItem> findHistoryUsingJdbcTemplate(JdbcTemplate targetJdbcTemplate) {
         String sql = """
-                SELECT id, author, filename, dateexecuted, orderexecuted, exectype
+                SELECT id,
+                       author,
+                       filename,
+                       dateexecuted,
+                       orderexecuted,
+                       exectype
                 FROM databasechangelog
                 ORDER BY orderexecuted
                 """;
 
-        return jdbcTemplate.query(sql, (rs, rowNum) -> MigrationHistoryItem.builder()
+        return targetJdbcTemplate.query(sql, (rs, rowNum) -> MigrationHistoryItem.builder()
                 .id(rs.getString("id"))
                 .author(rs.getString("author"))
                 .filename(rs.getString("filename"))
-                .dateExecuted(
-                        rs.getTimestamp("dateexecuted") != null
-                                ? rs.getTimestamp("dateexecuted").toLocalDateTime()
-                                : null
-                )
+                .dateExecuted(toLocalDateTime(rs.getTimestamp("dateexecuted")))
                 .orderExecuted(rs.getInt("orderexecuted"))
                 .execType(rs.getString("exectype"))
                 .build());
     }
 
-    public MigrationSummaryResponse getSummary() {
+    private MigrationSummaryResponse getSummaryUsingJdbcTemplate(JdbcTemplate targetJdbcTemplate) {
         String latestMigrationSql = """
                 SELECT id, dateexecuted
                 FROM databasechangelog
@@ -58,21 +109,17 @@ public class MigrationHistoryService {
                 FETCH FIRST 1 ROWS ONLY
                 """;
 
-        Integer total = jdbcTemplate.queryForObject(
+        Integer total = targetJdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM databasechangelog",
                 Integer.class
         );
 
-        return jdbcTemplate.query(latestMigrationSql, rs -> {
+        return targetJdbcTemplate.query(latestMigrationSql, rs -> {
             if (rs.next()) {
                 return MigrationSummaryResponse.builder()
                         .totalExecutedMigrations(total != null ? total : 0)
                         .latestMigrationId(rs.getString("id"))
-                        .latestExecutedAt(
-                                rs.getTimestamp("dateexecuted") != null
-                                        ? rs.getTimestamp("dateexecuted").toLocalDateTime()
-                                        : null
-                        )
+                        .latestExecutedAt(toLocalDateTime(rs.getTimestamp("dateexecuted")))
                         .status("TRACKED")
                         .build();
             }
@@ -86,8 +133,12 @@ public class MigrationHistoryService {
         });
     }
 
-    public List<PendingMigrationItem> findPendingMigrations() {
-        Set<String> executedChangesets = jdbcTemplate.queryForList(
+    private List<PendingMigrationItem> findPendingMigrationsUsingJdbcTemplate(
+            JdbcTemplate targetJdbcTemplate,
+            String targetChangelogPath,
+            String filename
+    ) {
+        Set<String> executedChangesets = targetJdbcTemplate.queryForList(
                         "SELECT id || '::' || author FROM databasechangelog",
                         String.class
                 )
@@ -97,7 +148,7 @@ public class MigrationHistoryService {
         Pattern changesetPattern = Pattern.compile("^--changeset\\s+([^:]+):(.+)$");
 
         try {
-            return Files.readAllLines(Path.of(changelogPath))
+            return Files.readAllLines(Path.of(targetChangelogPath))
                     .stream()
                     .map(String::trim)
                     .filter(line -> line.startsWith("--changeset"))
@@ -119,7 +170,7 @@ public class MigrationHistoryService {
                         return PendingMigrationItem.builder()
                                 .id(id)
                                 .author(author)
-                                .filename("project/changelog/db.changelog-master.sql")
+                                .filename(filename)
                                 .status("PENDING")
                                 .build();
                     })
@@ -127,7 +178,14 @@ public class MigrationHistoryService {
                     .toList();
 
         } catch (IOException e) {
-            throw new IllegalStateException("Unable to read Liquibase changelog file: " + changelogPath, e);
+            throw new IllegalStateException(
+                    "Unable to read Liquibase changelog file: " + targetChangelogPath,
+                    e
+            );
         }
+    }
+
+    private java.time.LocalDateTime toLocalDateTime(Timestamp timestamp) {
+        return timestamp != null ? timestamp.toLocalDateTime() : null;
     }
 }
