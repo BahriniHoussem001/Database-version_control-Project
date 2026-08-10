@@ -24,6 +24,7 @@ import {
   getEnvironmentPendingMigrations,
   getEnvironmentSchemaTables,
   getEnvironmentSummary,
+  getMigrationExecutionById,
   getMigrationExecutions
 } from './services/api'
 
@@ -47,6 +48,11 @@ const applyForm = ref({
   reason: '',
   requestedBy: 'houssem',
 })
+
+const showExecutionDetailsModal = ref(false)
+const selectedExecution = ref(null)
+const loadingExecutionDetails = ref(false)
+const pendingMigrations = ref([])
 
 const currentEnvironmentRow = computed(() => {
   return environmentRows.value.find((item) => item.name === selectedEnvironment.value)
@@ -178,6 +184,10 @@ async function loadSchemaTables() {
   const response = await getEnvironmentSchemaTables(selectedEnvironment.value)
   schemaTables.value = response.data
 }
+async function loadPendingMigrations() {
+  const response = await getEnvironmentPendingMigrations(selectedEnvironment.value)
+  pendingMigrations.value = response.data
+}
 
 async function loadRecentExecutions() {
   const response = await getMigrationExecutions()
@@ -208,11 +218,12 @@ async function loadDashboard() {
 
   try {
     await Promise.all([
-      loadEnvironmentRows(),
-      loadSchemaTables(),
-      loadRecentExecutions(),
-      loadComparisons(),
-    ])
+  loadEnvironmentRows(),
+  loadPendingMigrations(),
+  loadSchemaTables(),
+  loadRecentExecutions(),
+  loadComparisons(),
+])
   } catch (error) {
     errorMessage.value =
       error.response?.data?.message ||
@@ -239,6 +250,10 @@ function openApplyModal() {
 
 function closeApplyModal() {
   showApplyModal.value = false
+}
+
+function handleApplyEnvironmentChange() {
+  applyForm.value.reason = `Apply pending migrations to ${applyForm.value.environment}`
 }
 
 async function submitApplyMigrations() {
@@ -277,6 +292,32 @@ async function submitApplyMigrations() {
   } finally {
     applyingMigrations.value = false
   }
+}
+
+async function openExecutionDetails(executionId) {
+  loadingExecutionDetails.value = true
+  selectedExecution.value = null
+  showExecutionDetailsModal.value = true
+
+  try {
+    const response = await getMigrationExecutionById(executionId)
+    selectedExecution.value = response.data
+  } catch (error) {
+    errorMessage.value =
+      error.response?.data?.message ||
+      error.response?.data?.error ||
+      error.message ||
+      'Unable to load execution details'
+
+    showExecutionDetailsModal.value = false
+  } finally {
+    loadingExecutionDetails.value = false
+  }
+}
+
+function closeExecutionDetailsModal() {
+  showExecutionDetailsModal.value = false
+  selectedExecution.value = null
 }
 
 watch(selectedEnvironment, async () => {
@@ -396,8 +437,6 @@ onMounted(async () => {
           </button>
         </div>
 
-        
-
         <div v-if="errorMessage" class="error-banner">
           {{ errorMessage }}
         </div>
@@ -511,7 +550,8 @@ onMounted(async () => {
               <div
                 v-for="execution in recentExecutions"
                 :key="execution.id"
-                class="execution-item"
+                class="execution-item clickable"
+                @click="openExecutionDetails(execution.id)"
               >
                 <div>
                   <strong>{{ execution.environment }} · {{ executionActionLabel(execution.requestType) }}</strong>
@@ -555,6 +595,32 @@ onMounted(async () => {
               </span>
             </div>
           </article>
+          <article class="panel">
+  <div class="panel-header">
+    <div>
+      <h3>Pending Migrations</h3>
+      <p>Changesets waiting to be applied on {{ selectedEnvironment }}.</p>
+    </div>
+  </div>
+
+  <div v-if="pendingMigrations.length === 0" class="empty-state">
+    No pending migrations for {{ selectedEnvironment }}.
+  </div>
+
+  <div v-else class="pending-list">
+    <div
+      v-for="migration in pendingMigrations"
+      :key="migration.id + migration.author"
+      class="pending-item"
+    >
+      <div>
+        <strong>{{ migration.id }}</strong>
+        <span>{{ migration.filename }}</span>
+      </div>
+      <span class="status-pill warning">{{ migration.status }}</span>
+    </div>
+  </div>
+</article>
 
           <article class="panel">
             <div class="panel-header">
@@ -602,7 +668,7 @@ onMounted(async () => {
         <form class="execution-form" @submit.prevent="submitApplyMigrations">
           <label>
             Environment
-            <select v-model="applyForm.environment">
+            <select v-model="applyForm.environment" @change="handleApplyEnvironmentChange">
               <option>DEV</option>
               <option>TEST</option>
               <option>PROD</option>
@@ -635,5 +701,84 @@ onMounted(async () => {
         </form>
       </div>
     </div>
+
+    <div v-if="showExecutionDetailsModal" class="modal-backdrop">
+      <div class="modal-card large-modal">
+        <div class="modal-header">
+          <div>
+            <h3>Execution Details</h3>
+            <p>Audit information and Liquibase output for this execution.</p>
+          </div>
+          <button class="icon-button" @click="closeExecutionDetailsModal">×</button>
+        </div>
+
+        <div v-if="loadingExecutionDetails" class="loading-banner">
+          Loading execution details...
+        </div>
+
+        <div v-else-if="selectedExecution" class="details-content">
+          <div class="details-grid">
+            <div class="detail-item">
+              <span>Environment</span>
+              <strong>{{ selectedExecution.environment }}</strong>
+            </div>
+
+            <div class="detail-item">
+              <span>Action</span>
+              <strong>{{ executionActionLabel(selectedExecution.requestType) }}</strong>
+            </div>
+
+            <div class="detail-item">
+              <span>Status</span>
+              <strong>
+                <span class="status-pill" :class="statusClass(selectedExecution.status)">
+                  {{ selectedExecution.status }}
+                </span>
+              </strong>
+            </div>
+
+            <div class="detail-item">
+              <span>Duration</span>
+              <strong>{{ formatDuration(selectedExecution.durationMs) }}</strong>
+            </div>
+
+            <div class="detail-item">
+              <span>Requested By</span>
+              <strong>{{ selectedExecution.requestedBy }}</strong>
+            </div>
+
+            <div class="detail-item">
+              <span>Requested At</span>
+              <strong>{{ formatDate(selectedExecution.requestedAt) }}</strong>
+            </div>
+          </div>
+
+          <div class="detail-section">
+            <h4>Reason</h4>
+            <p>{{ selectedExecution.reason || '—' }}</p>
+          </div>
+
+          <div class="detail-section">
+            <h4>Validation Summary</h4>
+            <p>{{ selectedExecution.validationSummary || '—' }}</p>
+          </div>
+
+          <div class="detail-section">
+            <h4>Command</h4>
+            <pre>{{ selectedExecution.command || '—' }}</pre>
+          </div>
+
+          <div class="detail-section">
+            <h4>Liquibase Output</h4>
+            <pre>{{ selectedExecution.output || 'No output available.' }}</pre>
+          </div>
+
+          <div v-if="selectedExecution.error" class="detail-section error-section">
+            <h4>Error</h4>
+            <pre>{{ selectedExecution.error }}</pre>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
-</template> 
+</template>

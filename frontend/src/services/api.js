@@ -32,3 +32,6 @@ export function compareEnvironments(source, target) {
 export function createMigrationExecutionRequest(payload) {
   return api.post('/migration-executions', payload)
 }
+export function getMigrationExecutionById(id) {
+  return api.get(`/migration-executions/${id}`)
+}
