@@ -35,3 +35,6 @@ export function createMigrationExecutionRequest(payload) {
 export function getMigrationExecutionById(id) {
   return api.get(`/migration-executions/${id}`)
 }
+export function getEnvironmentTableColumns(environment, tableName) {
+  return api.get(`/environments/${environment}/schema/tables/${tableName}/columns`)
+}

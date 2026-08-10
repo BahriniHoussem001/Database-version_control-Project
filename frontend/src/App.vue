@@ -24,6 +24,7 @@ import {
   getEnvironmentPendingMigrations,
   getEnvironmentSchemaTables,
   getEnvironmentSummary,
+  getEnvironmentTableColumns,
   getMigrationExecutionById,
   getMigrationExecutions
 } from './services/api'
@@ -53,6 +54,9 @@ const showExecutionDetailsModal = ref(false)
 const selectedExecution = ref(null)
 const loadingExecutionDetails = ref(false)
 const pendingMigrations = ref([])
+const selectedSchemaTable = ref(null)
+const schemaColumns = ref([])
+const loadingSchemaColumns = ref(false)
 
 const currentEnvironmentRow = computed(() => {
   return environmentRows.value.find((item) => item.name === selectedEnvironment.value)
@@ -183,6 +187,8 @@ async function loadEnvironmentRows() {
 async function loadSchemaTables() {
   const response = await getEnvironmentSchemaTables(selectedEnvironment.value)
   schemaTables.value = response.data
+  selectedSchemaTable.value = null
+  schemaColumns.value = []
 }
 async function loadPendingMigrations() {
   const response = await getEnvironmentPendingMigrations(selectedEnvironment.value)
@@ -323,6 +329,24 @@ function closeExecutionDetailsModal() {
 watch(selectedEnvironment, async () => {
   await loadDashboard()
 })
+async function openSchemaTable(tableName) {
+  loadingSchemaColumns.value = true
+  selectedSchemaTable.value = tableName
+  schemaColumns.value = []
+
+  try {
+    const response = await getEnvironmentTableColumns(selectedEnvironment.value, tableName)
+    schemaColumns.value = response.data
+  } catch (error) {
+    errorMessage.value =
+      error.response?.data?.message ||
+      error.response?.data?.error ||
+      error.message ||
+      `Unable to load columns for ${tableName}`
+  } finally {
+    loadingSchemaColumns.value = false
+  }
+}
 
 onMounted(async () => {
   await loadDashboard()
@@ -622,24 +646,89 @@ onMounted(async () => {
   </div>
 </article>
 
-          <article class="panel">
-            <div class="panel-header">
-              <div>
-                <h3>Schema Explorer</h3>
-                <p>Tables in {{ selectedEnvironment }} environment.</p>
-              </div>
-            </div>
 
-            <div v-if="schemaTables.length === 0" class="empty-state">
-              No tables found.
-            </div>
+          <article class="panel schema-panel">
+  <div class="panel-header">
+    <div>
+      <h3>Schema Explorer</h3>
+      <p>Click a table in {{ selectedEnvironment }} to inspect its columns.</p>
+    </div>
+  </div>
 
-            <div v-else class="schema-list">
-              <span v-for="table in schemaTables" :key="table.tableName">
-                {{ table.tableName }}
-              </span>
-            </div>
-          </article>
+  <div v-if="schemaTables.length === 0" class="empty-state">
+    No tables found.
+  </div>
+
+  <div v-else class="schema-explorer-layout">
+    <div class="schema-table-list">
+      <button
+        v-for="table in schemaTables"
+        :key="table.tableName"
+        class="schema-table-button"
+        :class="{ active: selectedSchemaTable === table.tableName }"
+        @click="openSchemaTable(table.tableName)"
+      >
+        <strong>{{ table.tableName }}</strong>
+        <span>{{ table.status }}</span>
+      </button>
+    </div>
+
+    <div class="schema-columns-panel">
+      <div v-if="!selectedSchemaTable" class="empty-state">
+        Select a table to view its columns.
+      </div>
+
+      <div v-else-if="loadingSchemaColumns" class="loading-banner">
+        Loading columns for {{ selectedSchemaTable }}...
+      </div>
+
+      <div v-else>
+        <div class="columns-title">
+          <div>
+            <h4>{{ selectedSchemaTable }}</h4>
+            <p>{{ schemaColumns.length }} columns</p>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Column</th>
+              <th>Type</th>
+              <th>Nullable</th>
+              <th>Position</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="column in schemaColumns" :key="column.columnName">
+              <td>
+                <strong>{{ column.columnName }}</strong>
+              </td>
+              <td>
+                {{ column.dataType }}
+                <span v-if="column.dataPrecision">
+                  ({{ column.dataPrecision }}{{ column.dataScale !== null ? ',' + column.dataScale : '' }})
+                </span>
+                <span v-else-if="column.dataLength">
+                  ({{ column.dataLength }})
+                </span>
+              </td>
+              <td>
+                <span
+                  class="status-pill"
+                  :class="column.nullable === 'Y' ? 'muted' : 'success'"
+                >
+                  {{ column.nullable === 'Y' ? 'YES' : 'NO' }}
+                </span>
+              </td>
+              <td>{{ column.columnId }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</article>
         </section>
       </section>
     </main>
