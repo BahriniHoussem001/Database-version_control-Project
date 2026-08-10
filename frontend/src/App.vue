@@ -39,13 +39,11 @@ const recentExecutions = ref([])
 const schemaTables = ref([])
 const comparisons = ref([])
 
-const showExecutionModal = ref(false)
-const creatingExecution = ref(false)
+const showApplyModal = ref(false)
+const applyingMigrations = ref(false)
 
-const executionForm = ref({
+const applyForm = ref({
   environment: 'DEV',
-  requestType: 'UPDATE',
-  priority: 'NORMAL',
   reason: '',
   requestedBy: 'houssem',
 })
@@ -60,6 +58,18 @@ const currentTotalMigrations = computed(() => {
 
 const currentPendingMigrations = computed(() => {
   return currentEnvironmentRow.value?.pending ?? 0
+})
+
+const modalEnvironmentRow = computed(() => {
+  return environmentRows.value.find((item) => item.name === applyForm.value.environment)
+})
+
+const modalPendingMigrations = computed(() => {
+  return modalEnvironmentRow.value?.pending ?? 0
+})
+
+const canApplyMigrations = computed(() => {
+  return modalPendingMigrations.value > 0 && !applyingMigrations.value
 })
 
 const globalEnvironmentStatus = computed(() => {
@@ -125,6 +135,18 @@ function statusClass(status) {
   }
 
   return 'muted'
+}
+
+function executionActionLabel(requestType) {
+  if (requestType === 'UPDATE') {
+    return 'Apply migrations'
+  }
+
+  if (requestType === 'ROLLBACK') {
+    return 'Rollback'
+  }
+
+  return requestType || 'Unknown action'
 }
 
 async function loadEnvironmentRows() {
@@ -202,41 +224,44 @@ async function loadDashboard() {
   }
 }
 
-function openExecutionModal() {
+function openApplyModal() {
   successMessage.value = null
   errorMessage.value = null
 
-  executionForm.value = {
+  applyForm.value = {
     environment: selectedEnvironment.value,
-    requestType: 'UPDATE',
-    priority: 'NORMAL',
-    reason: `Apply migrations to ${selectedEnvironment.value}`,
+    reason: `Apply pending migrations to ${selectedEnvironment.value}`,
     requestedBy: 'houssem',
   }
 
-  showExecutionModal.value = true
+  showApplyModal.value = true
 }
 
-function closeExecutionModal() {
-  showExecutionModal.value = false
+function closeApplyModal() {
+  showApplyModal.value = false
 }
 
-async function submitExecutionRequest() {
-  creatingExecution.value = true
+async function submitApplyMigrations() {
+  if (modalPendingMigrations.value === 0) {
+    errorMessage.value = `No pending migrations to apply on ${applyForm.value.environment}.`
+    return
+  }
+
+  applyingMigrations.value = true
   errorMessage.value = null
   successMessage.value = null
 
   try {
     await createMigrationExecutionRequest({
-      environment: executionForm.value.environment,
-      requestType: executionForm.value.requestType,
-      priority: executionForm.value.priority,
-      reason: executionForm.value.reason,
-      requestedBy: executionForm.value.requestedBy,
+      environment: applyForm.value.environment,
+      requestType: 'UPDATE',
+      priority: 'NORMAL',
+      reason: applyForm.value.reason,
+      requestedBy: applyForm.value.requestedBy,
     })
 
-    successMessage.value = `Execution request created for ${executionForm.value.environment}.`
-    showExecutionModal.value = false
+    successMessage.value = `Migration application queued for ${applyForm.value.environment}.`
+    showApplyModal.value = false
 
     await loadDashboard()
 
@@ -248,9 +273,9 @@ async function submitExecutionRequest() {
       error.response?.data?.message ||
       error.response?.data?.error ||
       error.message ||
-      'Unable to create execution request'
+      'Unable to apply pending migrations'
   } finally {
-    creatingExecution.value = false
+    applyingMigrations.value = false
   }
 }
 
@@ -366,10 +391,12 @@ onMounted(async () => {
             <h2>Database Version Control Dashboard</h2>
             <p>Monitor migrations, schema state, and environment synchronization.</p>
           </div>
-          <button class="primary-button" @click="openExecutionModal">
-            Create Execution Request
+          <button class="primary-button" @click="openApplyModal">
+            Apply Pending Migrations
           </button>
         </div>
+
+        
 
         <div v-if="errorMessage" class="error-banner">
           {{ errorMessage }}
@@ -472,12 +499,12 @@ onMounted(async () => {
             <div class="panel-header">
               <div>
                 <h3>Recent Executions</h3>
-                <p>Latest migration execution requests.</p>
+                <p>Latest migration execution logs.</p>
               </div>
             </div>
 
             <div v-if="recentExecutions.length === 0" class="empty-state">
-              No execution requests found.
+              No execution logs found.
             </div>
 
             <div v-else class="execution-list">
@@ -487,7 +514,7 @@ onMounted(async () => {
                 class="execution-item"
               >
                 <div>
-                  <strong>{{ execution.environment }} · {{ execution.requestType }}</strong>
+                  <strong>{{ execution.environment }} · {{ executionActionLabel(execution.requestType) }}</strong>
                   <span>Requested by {{ execution.requestedBy }}</span>
                 </div>
                 <div class="execution-meta">
@@ -551,20 +578,31 @@ onMounted(async () => {
       </section>
     </main>
 
-    <div v-if="showExecutionModal" class="modal-backdrop">
+    <div v-if="showApplyModal" class="modal-backdrop">
       <div class="modal-card">
         <div class="modal-header">
           <div>
-            <h3>Create Execution Request</h3>
-            <p>Queue a Liquibase operation for a selected environment.</p>
+            <h3>Apply Pending Migrations</h3>
+            <p>Apply existing Liquibase changesets to a selected environment.</p>
           </div>
-          <button class="icon-button" @click="closeExecutionModal">×</button>
+          <button class="icon-button" @click="closeApplyModal">×</button>
         </div>
 
-        <form class="execution-form" @submit.prevent="submitExecutionRequest">
+        <div class="apply-summary">
+          <strong>{{ applyForm.environment }}</strong>
+          <span>
+            {{ modalPendingMigrations }} pending migration{{ modalPendingMigrations === 1 ? '' : 's' }}
+          </span>
+        </div>
+
+        <div v-if="modalPendingMigrations === 0" class="modal-warning">
+          This environment is already up to date. There are no pending migrations to apply.
+        </div>
+
+        <form class="execution-form" @submit.prevent="submitApplyMigrations">
           <label>
             Environment
-            <select v-model="executionForm.environment">
+            <select v-model="applyForm.environment">
               <option>DEV</option>
               <option>TEST</option>
               <option>PROD</option>
@@ -572,41 +610,30 @@ onMounted(async () => {
           </label>
 
           <label>
-            Request Type
-            <select v-model="executionForm.requestType">
-              <option>UPDATE</option>
-              <option>ROLLBACK</option>
-            </select>
-          </label>
-
-          <label>
-            Priority
-            <select v-model="executionForm.priority">
-              <option>NORMAL</option>
-              <option>URGENT</option>
-            </select>
-          </label>
-
-          <label>
             Requested By
-            <input v-model="executionForm.requestedBy" type="text" />
+            <input v-model="applyForm.requestedBy" type="text" />
           </label>
 
           <label class="full-width">
             Reason
-            <textarea v-model="executionForm.reason" rows="4"></textarea>
+            <textarea v-model="applyForm.reason" rows="4"></textarea>
           </label>
 
+          <p class="form-help full-width">
+            This action queues a controlled Liquibase update. The backend validates pending migrations,
+            runs the update, and stores execution logs.
+          </p>
+
           <div class="modal-actions">
-            <button type="button" class="secondary-button" @click="closeExecutionModal">
+            <button type="button" class="secondary-button" @click="closeApplyModal">
               Cancel
             </button>
-            <button type="submit" class="primary-button" :disabled="creatingExecution">
-              {{ creatingExecution ? 'Creating...' : 'Create Request' }}
+            <button type="submit" class="primary-button" :disabled="!canApplyMigrations">
+              {{ applyingMigrations ? 'Applying...' : 'Apply Migrations' }}
             </button>
           </div>
         </form>
       </div>
     </div>
   </div>
-</template>
+</template> 
