@@ -1,4 +1,5 @@
 <script setup>
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   Database,
   GitBranch,
@@ -13,62 +14,253 @@ import {
   Search,
   Bell,
   UserCircle,
-  Menu
+  Menu,
+  RefreshCw
 } from 'lucide-vue-next'
 
-const environments = [
-  {
-    name: 'DEV',
-    migrations: 4,
-    pending: 0,
-    status: 'Up to date',
-    lastUpdate: 'Ready',
-    tone: 'success'
-  },
-  {
-    name: 'TEST',
-    migrations: 4,
-    pending: 0,
-    status: 'Up to date',
-    lastUpdate: 'Ready',
-    tone: 'success'
-  },
-  {
-    name: 'PROD',
-    migrations: 4,
-    pending: 0,
-    status: 'Up to date',
-    lastUpdate: 'Ready',
-    tone: 'success'
-  }
-]
+import {
+  compareEnvironments,
+  createMigrationExecutionRequest,
+  getEnvironmentPendingMigrations,
+  getEnvironmentSchemaTables,
+  getEnvironmentSummary,
+  getMigrationExecutions
+} from './services/api'
 
-const recentExecutions = [
-  {
-    id: 1,
-    environment: 'DEV',
-    requestType: 'UPDATE',
-    status: 'SUCCESS',
-    duration: '15s',
-    requestedBy: 'houssem'
-  },
-  {
-    id: 2,
-    environment: 'TEST',
-    requestType: 'UPDATE',
-    status: 'SUCCESS',
-    duration: '12s',
-    requestedBy: 'houssem'
-  },
-  {
-    id: 3,
-    environment: 'PROD',
-    requestType: 'UPDATE',
-    status: 'SUCCESS',
-    duration: '14s',
-    requestedBy: 'houssem'
+const environmentNames = ['DEV', 'TEST', 'PROD']
+
+const selectedEnvironment = ref('DEV')
+const loading = ref(false)
+const errorMessage = ref(null)
+const successMessage = ref(null)
+
+const environmentRows = ref([])
+const recentExecutions = ref([])
+const schemaTables = ref([])
+const comparisons = ref([])
+
+const showExecutionModal = ref(false)
+const creatingExecution = ref(false)
+
+const executionForm = ref({
+  environment: 'DEV',
+  requestType: 'UPDATE',
+  priority: 'NORMAL',
+  reason: '',
+  requestedBy: 'houssem',
+})
+
+const currentEnvironmentRow = computed(() => {
+  return environmentRows.value.find((item) => item.name === selectedEnvironment.value)
+})
+
+const currentTotalMigrations = computed(() => {
+  return currentEnvironmentRow.value?.migrations ?? 0
+})
+
+const currentPendingMigrations = computed(() => {
+  return currentEnvironmentRow.value?.pending ?? 0
+})
+
+const globalEnvironmentStatus = computed(() => {
+  if (!environmentRows.value.length) {
+    return 'Loading'
   }
-]
+
+  const hasPending = environmentRows.value.some((item) => item.pending > 0)
+  const hasOutOfSync = comparisons.value.some((item) => !item.inSync)
+
+  if (hasPending || hasOutOfSync) {
+    return 'Needs Review'
+  }
+
+  return 'In Sync'
+})
+
+function formatDate(value) {
+  if (!value) {
+    return '—'
+  }
+
+  return new Date(value).toLocaleString()
+}
+
+function formatDuration(durationMs) {
+  if (durationMs === null || durationMs === undefined) {
+    return '—'
+  }
+
+  if (durationMs < 1000) {
+    return `${durationMs} ms`
+  }
+
+  return `${Math.round(durationMs / 1000)}s`
+}
+
+function environmentStatusFromPending(pendingCount) {
+  if (pendingCount > 0) {
+    return `Pending ${pendingCount}`
+  }
+
+  return 'Up to date'
+}
+
+function statusClass(status) {
+  if (!status) {
+    return 'muted'
+  }
+
+  const value = status.toUpperCase()
+
+  if (value.includes('SUCCESS') || value.includes('SYNC') || value.includes('UP TO DATE')) {
+    return 'success'
+  }
+
+  if (value.includes('RUNNING') || value.includes('QUEUED') || value.includes('PENDING')) {
+    return 'warning'
+  }
+
+  if (value.includes('FAILED') || value.includes('ERROR')) {
+    return 'danger'
+  }
+
+  return 'muted'
+}
+
+async function loadEnvironmentRows() {
+  const rows = await Promise.all(
+    environmentNames.map(async (environment) => {
+      const [summaryResponse, pendingResponse] = await Promise.all([
+        getEnvironmentSummary(environment),
+        getEnvironmentPendingMigrations(environment),
+      ])
+
+      const summary = summaryResponse.data
+      const pending = pendingResponse.data
+
+      return {
+        name: environment,
+        migrations: summary.totalExecutedMigrations ?? 0,
+        pending: pending.length,
+        status: environmentStatusFromPending(pending.length),
+        latestMigration: summary.latestMigrationId ?? '—',
+        lastUpdate: formatDate(summary.latestExecutedAt),
+      }
+    })
+  )
+
+  environmentRows.value = rows
+}
+
+async function loadSchemaTables() {
+  const response = await getEnvironmentSchemaTables(selectedEnvironment.value)
+  schemaTables.value = response.data
+}
+
+async function loadRecentExecutions() {
+  const response = await getMigrationExecutions()
+  recentExecutions.value = response.data.slice(0, 6)
+}
+
+async function loadComparisons() {
+  const [devTestResponse, testProdResponse] = await Promise.all([
+    compareEnvironments('DEV', 'TEST'),
+    compareEnvironments('TEST', 'PROD'),
+  ])
+
+  comparisons.value = [
+    {
+      label: 'DEV → TEST',
+      ...devTestResponse.data,
+    },
+    {
+      label: 'TEST → PROD',
+      ...testProdResponse.data,
+    },
+  ]
+}
+
+async function loadDashboard() {
+  loading.value = true
+  errorMessage.value = null
+
+  try {
+    await Promise.all([
+      loadEnvironmentRows(),
+      loadSchemaTables(),
+      loadRecentExecutions(),
+      loadComparisons(),
+    ])
+  } catch (error) {
+    errorMessage.value =
+      error.response?.data?.message ||
+      error.response?.data?.error ||
+      error.message ||
+      'Unable to load dashboard data'
+  } finally {
+    loading.value = false
+  }
+}
+
+function openExecutionModal() {
+  successMessage.value = null
+  errorMessage.value = null
+
+  executionForm.value = {
+    environment: selectedEnvironment.value,
+    requestType: 'UPDATE',
+    priority: 'NORMAL',
+    reason: `Apply migrations to ${selectedEnvironment.value}`,
+    requestedBy: 'houssem',
+  }
+
+  showExecutionModal.value = true
+}
+
+function closeExecutionModal() {
+  showExecutionModal.value = false
+}
+
+async function submitExecutionRequest() {
+  creatingExecution.value = true
+  errorMessage.value = null
+  successMessage.value = null
+
+  try {
+    await createMigrationExecutionRequest({
+      environment: executionForm.value.environment,
+      requestType: executionForm.value.requestType,
+      priority: executionForm.value.priority,
+      reason: executionForm.value.reason,
+      requestedBy: executionForm.value.requestedBy,
+    })
+
+    successMessage.value = `Execution request created for ${executionForm.value.environment}.`
+    showExecutionModal.value = false
+
+    await loadDashboard()
+
+    setTimeout(() => {
+      loadDashboard()
+    }, 6000)
+  } catch (error) {
+    errorMessage.value =
+      error.response?.data?.message ||
+      error.response?.data?.error ||
+      error.message ||
+      'Unable to create execution request'
+  } finally {
+    creatingExecution.value = false
+  }
+}
+
+watch(selectedEnvironment, async () => {
+  await loadDashboard()
+})
+
+onMounted(async () => {
+  await loadDashboard()
+})
 </script>
 
 <template>
@@ -146,13 +338,16 @@ const recentExecutions = [
         <div class="topbar-right">
           <label class="environment-select">
             Environment
-            <select>
-              <option>DEV</option>
-              <option>TEST</option>
-              <option>PROD</option>
+            <select v-model="selectedEnvironment">
+              <option v-for="environment in environmentNames" :key="environment">
+                {{ environment }}
+              </option>
             </select>
           </label>
 
+          <button class="icon-button" @click="loadDashboard" title="Refresh dashboard">
+            <RefreshCw :size="18" />
+          </button>
           <button class="icon-button">
             <Search :size="19" />
           </button>
@@ -171,14 +366,28 @@ const recentExecutions = [
             <h2>Database Version Control Dashboard</h2>
             <p>Monitor migrations, schema state, and environment synchronization.</p>
           </div>
-          <button class="primary-button">Create Execution Request</button>
+          <button class="primary-button" @click="openExecutionModal">
+            Create Execution Request
+          </button>
+        </div>
+
+        <div v-if="errorMessage" class="error-banner">
+          {{ errorMessage }}
+        </div>
+
+        <div v-if="successMessage" class="success-banner">
+          {{ successMessage }}
+        </div>
+
+        <div v-if="loading" class="loading-banner">
+          Loading dashboard data from backend...
         </div>
 
         <section class="cards-grid">
           <article class="metric-card">
             <div>
               <p>Current Environment</p>
-              <h3>DEV</h3>
+              <h3>{{ selectedEnvironment }}</h3>
               <span>Selected workspace</span>
             </div>
             <div class="metric-icon blue">
@@ -189,7 +398,7 @@ const recentExecutions = [
           <article class="metric-card">
             <div>
               <p>Total Migrations</p>
-              <h3>4</h3>
+              <h3>{{ currentTotalMigrations }}</h3>
               <span>Application changesets</span>
             </div>
             <div class="metric-icon purple">
@@ -200,7 +409,7 @@ const recentExecutions = [
           <article class="metric-card">
             <div>
               <p>Pending Migrations</p>
-              <h3>0</h3>
+              <h3>{{ currentPendingMigrations }}</h3>
               <span>Ready to apply</span>
             </div>
             <div class="metric-icon orange">
@@ -211,7 +420,7 @@ const recentExecutions = [
           <article class="metric-card">
             <div>
               <p>Environment Status</p>
-              <h3>In Sync</h3>
+              <h3>{{ globalEnvironmentStatus }}</h3>
               <span>DEV / TEST / PROD</span>
             </div>
             <div class="metric-icon green">
@@ -236,21 +445,23 @@ const recentExecutions = [
                   <th>Total Migrations</th>
                   <th>Pending</th>
                   <th>Status</th>
+                  <th>Latest Migration</th>
                   <th>Last Update</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="environment in environments" :key="environment.name">
+                <tr v-for="environment in environmentRows" :key="environment.name">
                   <td>
                     <strong>{{ environment.name }}</strong>
                   </td>
                   <td>{{ environment.migrations }}</td>
                   <td>{{ environment.pending }}</td>
                   <td>
-                    <span class="status-pill success">
+                    <span class="status-pill" :class="statusClass(environment.status)">
                       {{ environment.status }}
                     </span>
                   </td>
+                  <td>{{ environment.latestMigration }}</td>
                   <td>{{ environment.lastUpdate }}</td>
                 </tr>
               </tbody>
@@ -265,7 +476,11 @@ const recentExecutions = [
               </div>
             </div>
 
-            <div class="execution-list">
+            <div v-if="recentExecutions.length === 0" class="empty-state">
+              No execution requests found.
+            </div>
+
+            <div v-else class="execution-list">
               <div
                 v-for="execution in recentExecutions"
                 :key="execution.id"
@@ -276,8 +491,10 @@ const recentExecutions = [
                   <span>Requested by {{ execution.requestedBy }}</span>
                 </div>
                 <div class="execution-meta">
-                  <span class="status-pill success">{{ execution.status }}</span>
-                  <small>{{ execution.duration }}</small>
+                  <span class="status-pill" :class="statusClass(execution.status)">
+                    {{ execution.status }}
+                  </span>
+                  <small>{{ formatDuration(execution.durationMs) }}</small>
                 </div>
               </div>
             </div>
@@ -291,20 +508,24 @@ const recentExecutions = [
               </div>
             </div>
 
-            <div class="compare-card">
+            <div
+              v-for="comparison in comparisons"
+              :key="comparison.label"
+              class="compare-card"
+            >
               <div>
-                <strong>DEV → TEST</strong>
-                <span>No missing migrations</span>
+                <strong>{{ comparison.label }}</strong>
+                <span>
+                  {{ comparison.missingInTargetCount }} missing,
+                  {{ comparison.extraInTargetCount }} extra
+                </span>
               </div>
-              <span class="status-pill success">In sync</span>
-            </div>
-
-            <div class="compare-card">
-              <div>
-                <strong>TEST → PROD</strong>
-                <span>No missing migrations</span>
-              </div>
-              <span class="status-pill success">In sync</span>
+              <span
+                class="status-pill"
+                :class="comparison.inSync ? 'success' : 'warning'"
+              >
+                {{ comparison.inSync ? 'In sync' : 'Needs review' }}
+              </span>
             </div>
           </article>
 
@@ -312,19 +533,80 @@ const recentExecutions = [
             <div class="panel-header">
               <div>
                 <h3>Schema Explorer</h3>
-                <p>Browse tables and columns by environment.</p>
+                <p>Tables in {{ selectedEnvironment }} environment.</p>
               </div>
             </div>
 
-            <div class="schema-list">
-              <span>DATABASECHANGELOG</span>
-              <span>DATABASECHANGELOGLOCK</span>
-              <span>CUSTOMER</span>
-              <span>PRODUCT</span>
+            <div v-if="schemaTables.length === 0" class="empty-state">
+              No tables found.
+            </div>
+
+            <div v-else class="schema-list">
+              <span v-for="table in schemaTables" :key="table.tableName">
+                {{ table.tableName }}
+              </span>
             </div>
           </article>
         </section>
       </section>
     </main>
+
+    <div v-if="showExecutionModal" class="modal-backdrop">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div>
+            <h3>Create Execution Request</h3>
+            <p>Queue a Liquibase operation for a selected environment.</p>
+          </div>
+          <button class="icon-button" @click="closeExecutionModal">×</button>
+        </div>
+
+        <form class="execution-form" @submit.prevent="submitExecutionRequest">
+          <label>
+            Environment
+            <select v-model="executionForm.environment">
+              <option>DEV</option>
+              <option>TEST</option>
+              <option>PROD</option>
+            </select>
+          </label>
+
+          <label>
+            Request Type
+            <select v-model="executionForm.requestType">
+              <option>UPDATE</option>
+              <option>ROLLBACK</option>
+            </select>
+          </label>
+
+          <label>
+            Priority
+            <select v-model="executionForm.priority">
+              <option>NORMAL</option>
+              <option>URGENT</option>
+            </select>
+          </label>
+
+          <label>
+            Requested By
+            <input v-model="executionForm.requestedBy" type="text" />
+          </label>
+
+          <label class="full-width">
+            Reason
+            <textarea v-model="executionForm.reason" rows="4"></textarea>
+          </label>
+
+          <div class="modal-actions">
+            <button type="button" class="secondary-button" @click="closeExecutionModal">
+              Cancel
+            </button>
+            <button type="submit" class="primary-button" :disabled="creatingExecution">
+              {{ creatingExecution ? 'Creating...' : 'Create Request' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   </div>
 </template>
