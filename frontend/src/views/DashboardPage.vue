@@ -467,10 +467,18 @@ onMounted(async () => {
             <textarea v-model="applyForm.reason" rows="4"></textarea>
           </label>
 
-          <p class="form-help full-width">
-            This action queues a controlled Liquibase update. The backend validates pending migrations,
-            runs the update, and stores execution logs.
-          </p>
+          <div class="migration-policy-note full-width">
+  <strong>Ordered migration policy</strong>
+  <p>
+    Pending migrations are applied in Liquibase changelog order. Selective skipping is disabled
+    to preserve schema consistency and avoid applying a migration without its prerequisites.
+  </p>
+</div>
+
+<p class="form-help full-width">
+  This action queues a controlled Liquibase update. The backend validates pending migrations,
+  runs the update, and stores execution logs.
+</p>
 
           <div class="modal-actions">
             <button type="button" class="secondary-button" @click="closeApplyModal">

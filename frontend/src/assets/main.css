@@ -856,3 +856,23 @@ td {
   border-color: #2563eb;
   background: #eff6ff;
 }
+.migration-policy-note {
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1e3a8a;
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+
+.migration-policy-note strong {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 5px;
+}
+
+.migration-policy-note p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}

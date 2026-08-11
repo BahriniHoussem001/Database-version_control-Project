@@ -34,6 +34,13 @@ onMounted(loadPending)
         <p>Changesets waiting to be applied on {{ selectedEnvironment }}.</p>
       </div>
     </div>
+    <div class="migration-policy-note">
+  <strong>Ordered migration policy</strong>
+  <p>
+    The platform applies pending changesets in changelog order. Skipping individual pending
+    migrations is not allowed in the MVP because later migrations may depend on earlier ones.
+  </p>
+</div>
 
     <div v-if="errorMessage" class="error-banner">{{ errorMessage }}</div>
     <div v-if="loading" class="loading-banner">Loading pending migrations...</div>
