@@ -38,3 +38,6 @@ export function getMigrationExecutionById(id) {
 export function getEnvironmentTableColumns(environment, tableName) {
   return api.get(`/environments/${environment}/schema/tables/${tableName}/columns`)
 }
+export function getEnvironmentMigrationHistory(environment) {
+  return api.get(`/environments/${environment}/migrations/history`)
+}

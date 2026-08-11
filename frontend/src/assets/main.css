@@ -818,3 +818,41 @@ td {
     grid-template-columns: 1fr;
   }
 }
+.page-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.secondary-button {
+  border: 1px solid #dbe3ee;
+  background: white;
+  color: #334155;
+  padding: 11px 16px;
+  border-radius: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.module-links {
+  display: grid;
+  gap: 10px;
+}
+
+.module-links a {
+  display: block;
+  padding: 13px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 13px;
+  background: #f8fafc;
+  color: #0f172a;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.module-links a:hover {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
