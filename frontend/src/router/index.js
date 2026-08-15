@@ -1,6 +1,17 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { isAuthenticated } from '../services/auth'
 
 const routes = [
+  {
+    path: '/login',
+    name: 'login',
+    component: () => import('../views/LoginPage.vue'),
+    meta: {
+      public: true,
+      title: 'Login',
+      subtitle: 'Secure access',
+    },
+  },
   {
     path: '/',
     name: 'dashboard',
@@ -69,6 +80,18 @@ const routes = [
 const router = createRouter({
   history: createWebHistory(),
   routes,
+})
+
+router.beforeEach((to) => {
+  if (to.meta.public) {
+    return true
+  }
+
+  if (!isAuthenticated()) {
+    return '/login'
+  }
+
+  return true
 })
 
 export default router

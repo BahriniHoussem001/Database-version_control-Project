@@ -1,6 +1,7 @@
 <script setup>
 import { computed, provide, ref } from 'vue'
 import { useRoute } from 'vue-router'
+import { getAuthUser, logout as clearAuthSession } from './services/auth'
 import {
   Database,
   GitBranch,
@@ -23,18 +24,26 @@ provide('selectedEnvironment', selectedEnvironment)
 provide('environmentNames', environmentNames)
 
 const route = useRoute()
+const currentUser = ref(getAuthUser())
 
-const pageTitle = computed(() => {
-  return route.meta?.title || 'Dashboard'
-})
+provide('currentUser', currentUser)
 
-const pageSubtitle = computed(() => {
-  return route.meta?.subtitle || 'Database migration control center'
-})
+const isLoginPage = computed(() => route.path === '/login')
+
+const pageTitle = computed(() => route.meta?.title || 'Dashboard')
+const pageSubtitle = computed(() => route.meta?.subtitle || 'Database migration control center')
+
+function handleLogout() {
+  clearAuthSession()
+  currentUser.value = null
+  window.location.href = '/login'
+}
 </script>
 
 <template>
-  <div class="app-shell">
+  <RouterView v-if="isLoginPage" />
+
+  <div v-else class="app-shell">
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-icon">
@@ -49,81 +58,55 @@ const pageSubtitle = computed(() => {
       <nav class="nav">
         <p class="nav-label">Overview</p>
 
-        <RouterLink
-          class="nav-item"
-          exact-active-class="active"
-          to="/"
-        >
+        <RouterLink class="nav-item" exact-active-class="active" to="/">
           <LayoutDashboard :size="18" />
           Dashboard
         </RouterLink>
 
         <p class="nav-label">Migrations</p>
 
-        <RouterLink
-          class="nav-item"
-          active-class="active"
-          to="/migration-history"
-        >
+        <RouterLink class="nav-item" active-class="active" to="/migration-history">
           <GitBranch :size="18" />
           Migration History
         </RouterLink>
 
-        <RouterLink
-          class="nav-item"
-          active-class="active"
-          to="/pending-migrations"
-        >
+        <RouterLink class="nav-item" active-class="active" to="/pending-migrations">
           <Clock :size="18" />
           Pending Migrations
         </RouterLink>
 
-        <RouterLink
-          class="nav-item"
-          active-class="active"
-          to="/execution-logs"
-        >
+        <RouterLink class="nav-item" active-class="active" to="/execution-logs">
           <FileClock :size="18" />
           Execution Logs
         </RouterLink>
 
         <p class="nav-label">Compare & Schema</p>
 
-        <RouterLink
-          class="nav-item"
-          active-class="active"
-          to="/environment-comparison"
-        >
+        <RouterLink class="nav-item" active-class="active" to="/environment-comparison">
           <Layers :size="18" />
           Environment Comparison
         </RouterLink>
 
-        <RouterLink
-          class="nav-item"
-          active-class="active"
-          to="/schema-explorer"
-        >
+        <RouterLink class="nav-item" active-class="active" to="/schema-explorer">
           <Server :size="18" />
           Schema Explorer
         </RouterLink>
 
         <p class="nav-label">Admin</p>
 
-        <RouterLink
-          class="nav-item"
-          active-class="active"
-          to="/settings"
-        >
+        <RouterLink class="nav-item" active-class="active" to="/settings">
           <Settings :size="18" />
           Settings
         </RouterLink>
       </nav>
 
       <div class="sidebar-user">
-        <div class="avatar">HB</div>
+        <div class="avatar">
+          {{ currentUser?.username?.slice(0, 2).toUpperCase() || 'DB' }}
+        </div>
         <div>
-          <strong>Houssem</strong>
-          <span>Developer / Admin</span>
+          <strong>{{ currentUser?.username || 'Guest' }}</strong>
+          <span>{{ currentUser?.role || 'Unauthenticated' }}</span>
         </div>
       </div>
     </aside>
@@ -145,11 +128,7 @@ const pageSubtitle = computed(() => {
           <label class="environment-select">
             Environment
             <select v-model="selectedEnvironment">
-              <option
-                v-for="environment in environmentNames"
-                :key="environment"
-                :value="environment"
-              >
+              <option v-for="environment in environmentNames" :key="environment" :value="environment">
                 {{ environment }}
               </option>
             </select>
@@ -163,8 +142,9 @@ const pageSubtitle = computed(() => {
             <Bell :size="19" />
           </button>
 
-          <button class="icon-button">
-            <UserCircle :size="24" />
+          <button class="logout-button" @click="handleLogout">
+            <UserCircle :size="18" />
+            Logout
           </button>
         </div>
       </header>

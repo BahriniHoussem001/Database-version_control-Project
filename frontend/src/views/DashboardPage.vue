@@ -22,6 +22,7 @@ const environmentNames = inject('environmentNames')
 const loading = ref(false)
 const errorMessage = ref(null)
 const successMessage = ref(null)
+const currentUser = inject('currentUser')
 
 const environmentRows = ref([])
 const recentExecutions = ref([])
@@ -34,6 +35,9 @@ const applyForm = ref({
   environment: 'DEV',
   reason: '',
   requestedBy: 'houssem',
+})
+const isAdmin = computed(() => {
+  return currentUser.value?.role === 'ADMIN'
 })
 
 const currentEnvironmentRow = computed(() => {
@@ -246,9 +250,13 @@ onMounted(async () => {
           Refresh
         </button>
 
-        <button class="primary-button" @click="openApplyModal">
-          Apply Pending Migrations
-        </button>
+        <button
+  v-if="isAdmin"
+  class="primary-button"
+  @click="openApplyModal"
+>
+  Apply Pending Migrations
+</button>
       </div>
     </div>
 
