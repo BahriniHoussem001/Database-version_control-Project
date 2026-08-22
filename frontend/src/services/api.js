@@ -78,3 +78,6 @@ export function compareEnvironments(source, target) {
 export function getEnvironmentPromotionStatus() {
   return api.get('/environments/promotion-status')
 }
+export function createGeneratedMigration(payload) {
+  return api.post('/generated-migrations', payload)
+}

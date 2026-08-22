@@ -10,6 +10,7 @@ import {
   Settings,
   Server,
   FileClock,
+  FileText,
   LayoutDashboard,
   Search,
   Bell,
@@ -49,6 +50,7 @@ function handleLogout() {
         <div class="brand-icon">
           <Database :size="22" />
         </div>
+
         <div>
           <h1>DB Version Control</h1>
           <p>Oracle + Liquibase</p>
@@ -60,43 +62,48 @@ function handleLogout() {
 
         <RouterLink class="nav-item" exact-active-class="active" to="/">
           <LayoutDashboard :size="18" />
-          Dashboard
+          <span>Dashboard</span>
         </RouterLink>
 
         <p class="nav-label">Migrations</p>
 
         <RouterLink class="nav-item" active-class="active" to="/migration-history">
           <GitBranch :size="18" />
-          Migration History
+          <span>Migration History</span>
         </RouterLink>
 
         <RouterLink class="nav-item" active-class="active" to="/pending-migrations">
           <Clock :size="18" />
-          Pending Migrations
+          <span>Pending Migrations</span>
+        </RouterLink>
+
+        <RouterLink class="nav-item" active-class="active" to="/migration-builder">
+          <FileText :size="18" />
+          <span>Migration Builder</span>
         </RouterLink>
 
         <RouterLink class="nav-item" active-class="active" to="/execution-logs">
           <FileClock :size="18" />
-          Execution Logs
+          <span>Execution Logs</span>
         </RouterLink>
 
         <p class="nav-label">Compare & Schema</p>
 
         <RouterLink class="nav-item" active-class="active" to="/environment-comparison">
           <Layers :size="18" />
-          Environment Comparison
+          <span>Environment Comparison</span>
         </RouterLink>
 
         <RouterLink class="nav-item" active-class="active" to="/schema-explorer">
           <Server :size="18" />
-          Schema Explorer
+          <span>Schema Explorer</span>
         </RouterLink>
 
         <p class="nav-label">Admin</p>
 
         <RouterLink class="nav-item" active-class="active" to="/settings">
           <Settings :size="18" />
-          Settings
+          <span>Settings</span>
         </RouterLink>
       </nav>
 
@@ -104,6 +111,7 @@ function handleLogout() {
         <div class="avatar">
           {{ currentUser?.username?.slice(0, 2).toUpperCase() || 'DB' }}
         </div>
+
         <div>
           <strong>{{ currentUser?.username || 'Guest' }}</strong>
           <span>{{ currentUser?.role || 'Unauthenticated' }}</span>
@@ -128,7 +136,11 @@ function handleLogout() {
           <label class="environment-select">
             Environment
             <select v-model="selectedEnvironment">
-              <option v-for="environment in environmentNames" :key="environment" :value="environment">
+              <option
+                v-for="environment in environmentNames"
+                :key="environment"
+                :value="environment"
+              >
                 {{ environment }}
               </option>
             </select>

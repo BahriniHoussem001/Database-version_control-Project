@@ -75,6 +75,15 @@ const routes = [
       subtitle: 'Environment configuration overview',
     },
   },
+  {
+  path: '/migration-builder',
+  name: 'migration-builder',
+  component: () => import('../views/MigrationBuilderPage.vue'),
+  meta: {
+    title: 'Migration Builder',
+    subtitle: 'Generate application migration files',
+  },
+},
 ]
 
 const router = createRouter({
