@@ -75,3 +75,6 @@ export function compareEnvironments(source, target) {
     },
   })
 }
+export function getEnvironmentPromotionStatus() {
+  return api.get('/environments/promotion-status')
+}

@@ -12,21 +12,23 @@ import {
   compareEnvironments,
   createMigrationExecutionRequest,
   getEnvironmentPendingMigrations,
+  getEnvironmentPromotionStatus,
   getEnvironmentSummary,
   getMigrationExecutions,
 } from '../services/api'
 
 const selectedEnvironment = inject('selectedEnvironment')
 const environmentNames = inject('environmentNames')
+const currentUser = inject('currentUser')
 
 const loading = ref(false)
 const errorMessage = ref(null)
 const successMessage = ref(null)
-const currentUser = inject('currentUser')
 
 const environmentRows = ref([])
 const recentExecutions = ref([])
 const comparisons = ref([])
+const promotionStatuses = ref([])
 
 const showApplyModal = ref(false)
 const applyingMigrations = ref(false)
@@ -36,6 +38,7 @@ const applyForm = ref({
   reason: '',
   requestedBy: 'houssem',
 })
+
 const isAdmin = computed(() => {
   return currentUser.value?.role === 'ADMIN'
 })
@@ -54,7 +57,11 @@ const modalEnvironmentRow = computed(() => {
 const modalPendingMigrations = computed(() => modalEnvironmentRow.value?.pending ?? 0)
 
 const canApplyMigrations = computed(() => {
-  return modalPendingMigrations.value > 0 && !applyingMigrations.value
+  return (
+    modalPendingMigrations.value > 0 &&
+    canApplyEnvironment(applyForm.value.environment) &&
+    !applyingMigrations.value
+  )
 })
 
 const globalEnvironmentStatus = computed(() => {
@@ -105,6 +112,18 @@ function executionActionLabel(requestType) {
   return requestType || 'Unknown action'
 }
 
+function getPromotionStatus(environment) {
+  return promotionStatuses.value.find((item) => item.environment === environment)
+}
+
+function canApplyEnvironment(environment) {
+  return getPromotionStatus(environment)?.canApply === true
+}
+
+function getApplyBlockedReason(environment) {
+  return getPromotionStatus(environment)?.blockedReason || null
+}
+
 async function loadEnvironmentRows() {
   const rows = await Promise.all(
     environmentNames.map(async (environment) => {
@@ -147,6 +166,11 @@ async function loadComparisons() {
   ]
 }
 
+async function loadPromotionStatuses() {
+  const response = await getEnvironmentPromotionStatus()
+  promotionStatuses.value = response.data
+}
+
 async function loadDashboard() {
   loading.value = true
   errorMessage.value = null
@@ -156,6 +180,7 @@ async function loadDashboard() {
       loadEnvironmentRows(),
       loadRecentExecutions(),
       loadComparisons(),
+      loadPromotionStatuses(),
     ])
   } catch (error) {
     errorMessage.value =
@@ -175,7 +200,7 @@ function openApplyModal() {
   applyForm.value = {
     environment: selectedEnvironment.value,
     reason: `Apply pending migrations to ${selectedEnvironment.value}`,
-    requestedBy: 'houssem',
+    requestedBy: currentUser.value?.username || 'SYSTEM',
   }
 
   showApplyModal.value = true
@@ -192,6 +217,13 @@ function handleApplyEnvironmentChange() {
 async function submitApplyMigrations() {
   if (modalPendingMigrations.value === 0) {
     errorMessage.value = `No pending migrations to apply on ${applyForm.value.environment}.`
+    return
+  }
+
+  if (!canApplyEnvironment(applyForm.value.environment)) {
+    errorMessage.value =
+      getApplyBlockedReason(applyForm.value.environment) ||
+      `Migrations cannot be applied to ${applyForm.value.environment}.`
     return
   }
 
@@ -251,12 +283,12 @@ onMounted(async () => {
         </button>
 
         <button
-  v-if="isAdmin"
-  class="primary-button"
-  @click="openApplyModal"
->
-  Apply Pending Migrations
-</button>
+          v-if="isAdmin"
+          class="primary-button"
+          @click="openApplyModal"
+        >
+          Apply Pending Migrations
+        </button>
       </div>
     </div>
 
@@ -455,19 +487,31 @@ onMounted(async () => {
           This environment is already up to date. There are no pending migrations to apply.
         </div>
 
+        <div
+          v-if="getApplyBlockedReason(applyForm.environment)"
+          class="modal-warning"
+        >
+          {{ getApplyBlockedReason(applyForm.environment) }}
+        </div>
+
         <form class="execution-form" @submit.prevent="submitApplyMigrations">
           <label>
             Environment
             <select v-model="applyForm.environment" @change="handleApplyEnvironmentChange">
-              <option>DEV</option>
-              <option>TEST</option>
-              <option>PROD</option>
+              <option
+                v-for="environment in environmentNames"
+                :key="environment"
+                :value="environment"
+                :disabled="!canApplyEnvironment(environment)"
+              >
+                {{ environment }}
+              </option>
             </select>
           </label>
 
           <label>
             Requested By
-            <input v-model="applyForm.requestedBy" type="text" />
+            <input v-model="applyForm.requestedBy" type="text" disabled />
           </label>
 
           <label class="full-width">
@@ -475,18 +519,12 @@ onMounted(async () => {
             <textarea v-model="applyForm.reason" rows="4"></textarea>
           </label>
 
-          <div class="migration-policy-note full-width">
-  <strong>Ordered migration policy</strong>
-  <p>
-    Pending migrations are applied in Liquibase changelog order. Selective skipping is disabled
-    to preserve schema consistency and avoid applying a migration without its prerequisites.
-  </p>
-</div>
+          
 
-<p class="form-help full-width">
-  This action queues a controlled Liquibase update. The backend validates pending migrations,
-  runs the update, and stores execution logs.
-</p>
+          <p class="form-help full-width">
+            This action queues a controlled Liquibase update. The backend validates pending migrations,
+            runs the update, and stores execution logs.
+          </p>
 
           <div class="modal-actions">
             <button type="button" class="secondary-button" @click="closeApplyModal">

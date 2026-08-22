@@ -5,7 +5,7 @@ import com.dbvc.dto.LiquibaseExecutionResult;
 import com.dbvc.dto.MigrationExecutionResponse;
 import com.dbvc.dto.MigrationExecutionSummaryResponse;
 import com.dbvc.dto.MigrationValidationResult;
-
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -19,21 +19,15 @@ import java.sql.Timestamp;
 import java.util.List;
 
 @Service
+@RequiredArgsConstructor
 public class MigrationExecutionService {
 
     private final JdbcTemplate jdbcTemplate;
     private final MigrationValidationService migrationValidationService;
+    private final EnvironmentPromotionPolicyService environmentPromotionPolicyService;
 
     @Value("${dbvc.project-root}")
     private String projectRoot;
-
-    public MigrationExecutionService(
-            JdbcTemplate jdbcTemplate,
-            MigrationValidationService migrationValidationService
-    ) {
-        this.jdbcTemplate = jdbcTemplate;
-        this.migrationValidationService = migrationValidationService;
-    }
 
     public MigrationExecutionResponse createExecutionRequest(CreateMigrationExecutionRequest request) {
         String environment = normalizeEnvironment(request.getEnvironment());
@@ -41,6 +35,10 @@ public class MigrationExecutionService {
         String priority = normalizePriority(request.getPriority());
         String reason = cleanText(request.getReason());
         String requestedBy = cleanText(request.getRequestedBy());
+
+        if ("UPDATE".equals(requestType)) {
+            environmentPromotionPolicyService.assertCanApply(environment);
+        }
 
         if (requestedBy == null) {
             requestedBy = "SYSTEM";
@@ -335,6 +333,8 @@ public class MigrationExecutionService {
             return "No validation required for request type: " + request.getRequestType()
                     + " on environment: " + request.getEnvironment();
         }
+
+        environmentPromotionPolicyService.assertCanApply(request.getEnvironment());
 
         List<MigrationValidationResult> validationResults =
                 migrationValidationService.validatePendingMigrationsByEnvironment(request.getEnvironment());
