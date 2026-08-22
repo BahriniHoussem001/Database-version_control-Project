@@ -12,11 +12,13 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Timestamp;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 public class MigrationHistoryService {
@@ -29,6 +31,9 @@ public class MigrationHistoryService {
 
     @Value("${dbvc.liquibase.application-changelog-path:../liquibase/changelog/db.application-changelog-master.sql}")
     private String applicationChangelogPath;
+
+    @Value("${dbvc.liquibase.generated-changelog-directory:../liquibase/changelog/generated}")
+    private String generatedChangelogDirectory;
 
     public MigrationHistoryService(
             JdbcTemplate jdbcTemplate,
@@ -63,8 +68,10 @@ public class MigrationHistoryService {
     public List<PendingMigrationItem> findPendingMigrations() {
         return findPendingMigrationsUsingJdbcTemplate(
                 jdbcTemplate,
-                changelogPath,
-                "project/changelog/db.changelog-master.sql"
+                List.of(new ChangelogFile(
+                        Path.of(changelogPath),
+                        "project/changelog/db.changelog-master.sql"
+                ))
         );
     }
 
@@ -74,8 +81,7 @@ public class MigrationHistoryService {
 
         return findPendingMigrationsUsingJdbcTemplate(
                 environmentJdbcTemplate,
-                applicationChangelogPath,
-                "project/changelog/db.application-changelog-master.sql"
+                getApplicationChangelogFiles()
         );
     }
 
@@ -135,8 +141,7 @@ public class MigrationHistoryService {
 
     private List<PendingMigrationItem> findPendingMigrationsUsingJdbcTemplate(
             JdbcTemplate targetJdbcTemplate,
-            String targetChangelogPath,
-            String filename
+            List<ChangelogFile> changelogFiles
     ) {
         Set<String> executedChangesets = targetJdbcTemplate.queryForList(
                         "SELECT id || '::' || author FROM databasechangelog",
@@ -145,10 +150,23 @@ public class MigrationHistoryService {
                 .stream()
                 .collect(Collectors.toSet());
 
+        return changelogFiles.stream()
+                .flatMap(changelogFile -> parsePendingChangesets(changelogFile).stream())
+                .filter(changeset -> !executedChangesets.contains(changeset.id() + "::" + changeset.author()))
+                .map(changeset -> PendingMigrationItem.builder()
+                        .id(changeset.id())
+                        .author(changeset.author())
+                        .filename(changeset.filename())
+                        .status("PENDING")
+                        .build())
+                .toList();
+    }
+
+    private List<ParsedPendingChangeset> parsePendingChangesets(ChangelogFile changelogFile) {
         Pattern changesetPattern = Pattern.compile("^--changeset\\s+([^:]+):(.+)$");
 
         try {
-            return Files.readAllLines(Path.of(targetChangelogPath))
+            return Files.readAllLines(changelogFile.path())
                     .stream()
                     .map(String::trim)
                     .filter(line -> line.startsWith("--changeset"))
@@ -161,25 +179,58 @@ public class MigrationHistoryService {
 
                         String author = matcher.group(1).trim();
                         String id = matcher.group(2).trim();
-                        String key = id + "::" + author;
 
-                        if (executedChangesets.contains(key)) {
-                            return null;
-                        }
-
-                        return PendingMigrationItem.builder()
-                                .id(id)
-                                .author(author)
-                                .filename(filename)
-                                .status("PENDING")
-                                .build();
+                        return new ParsedPendingChangeset(
+                                id,
+                                author,
+                                changelogFile.liquibaseFilename()
+                        );
                     })
                     .filter(item -> item != null)
                     .toList();
 
         } catch (IOException e) {
             throw new IllegalStateException(
-                    "Unable to read Liquibase changelog file: " + targetChangelogPath,
+                    "Unable to read Liquibase changelog file: " + changelogFile.path(),
+                    e
+            );
+        }
+    }
+
+    private List<ChangelogFile> getApplicationChangelogFiles() {
+        List<ChangelogFile> generatedFiles = getGeneratedChangelogFiles();
+
+        return Stream.concat(
+                        Stream.of(new ChangelogFile(
+                                Path.of(applicationChangelogPath),
+                                "project/changelog/db.application-changelog-master.sql"
+                        )),
+                        generatedFiles.stream()
+                )
+                .toList();
+    }
+
+    private List<ChangelogFile> getGeneratedChangelogFiles() {
+        Path generatedDirectory = Path.of(generatedChangelogDirectory);
+
+        if (!Files.exists(generatedDirectory)) {
+            return List.of();
+        }
+
+        try (Stream<Path> files = Files.list(generatedDirectory)) {
+            return files
+                    .filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().toLowerCase().endsWith(".sql"))
+                    .sorted(Comparator.comparing(path -> path.getFileName().toString()))
+                    .map(path -> new ChangelogFile(
+                            path,
+                            "project/changelog/generated/" + path.getFileName()
+                    ))
+                    .toList();
+
+        } catch (IOException e) {
+            throw new IllegalStateException(
+                    "Unable to scan generated changelog directory: " + generatedChangelogDirectory,
                     e
             );
         }
@@ -187,5 +238,18 @@ public class MigrationHistoryService {
 
     private java.time.LocalDateTime toLocalDateTime(Timestamp timestamp) {
         return timestamp != null ? timestamp.toLocalDateTime() : null;
+    }
+
+    private record ChangelogFile(
+            Path path,
+            String liquibaseFilename
+    ) {
+    }
+
+    private record ParsedPendingChangeset(
+            String id,
+            String author,
+            String filename
+    ) {
     }
 }

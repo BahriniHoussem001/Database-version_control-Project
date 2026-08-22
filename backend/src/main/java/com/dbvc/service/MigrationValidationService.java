@@ -10,11 +10,13 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 public class MigrationValidationService {
@@ -28,6 +30,9 @@ public class MigrationValidationService {
     @Value("${dbvc.liquibase.application-changelog-path:../liquibase/changelog/db.application-changelog-master.sql}")
     private String applicationChangelogPath;
 
+    @Value("${dbvc.liquibase.generated-changelog-directory:../liquibase/changelog/generated}")
+    private String generatedChangelogDirectory;
+
     public MigrationValidationService(
             JdbcTemplate jdbcTemplate,
             EnvironmentJdbcTemplateProvider environmentJdbcTemplateProvider
@@ -39,7 +44,7 @@ public class MigrationValidationService {
     public List<MigrationValidationResult> validatePendingMigrations() {
         return validatePendingMigrationsUsingJdbcTemplate(
                 jdbcTemplate,
-                changelogPath
+                List.of(Path.of(changelogPath))
         );
     }
 
@@ -49,13 +54,13 @@ public class MigrationValidationService {
 
         return validatePendingMigrationsUsingJdbcTemplate(
                 environmentJdbcTemplate,
-                applicationChangelogPath
+                getApplicationChangelogFiles()
         );
     }
 
     private List<MigrationValidationResult> validatePendingMigrationsUsingJdbcTemplate(
             JdbcTemplate targetJdbcTemplate,
-            String targetChangelogPath
+            List<Path> changelogFiles
     ) {
         Set<String> executedChangesets = targetJdbcTemplate.queryForList(
                         "SELECT id || '::' || author FROM databasechangelog",
@@ -64,7 +69,9 @@ public class MigrationValidationService {
                 .stream()
                 .collect(Collectors.toSet());
 
-        List<ParsedChangeset> changesets = parseChangesets(targetChangelogPath);
+        List<ParsedChangeset> changesets = changelogFiles.stream()
+                .flatMap(path -> parseChangesets(path).stream())
+                .toList();
 
         return changesets.stream()
                 .filter(changeset -> !executedChangesets.contains(changeset.id() + "::" + changeset.author()))
@@ -72,11 +79,11 @@ public class MigrationValidationService {
                 .toList();
     }
 
-    private List<ParsedChangeset> parseChangesets(String targetChangelogPath) {
+    private List<ParsedChangeset> parseChangesets(Path changelogFilePath) {
         Pattern changesetPattern = Pattern.compile("^--changeset\\s+([^:]+):(.+)$");
 
         try {
-            List<String> lines = Files.readAllLines(Path.of(targetChangelogPath));
+            List<String> lines = Files.readAllLines(changelogFilePath);
             List<ParsedChangeset> changesets = new ArrayList<>();
 
             String currentAuthor = null;
@@ -124,7 +131,39 @@ public class MigrationValidationService {
 
         } catch (IOException e) {
             throw new IllegalStateException(
-                    "Unable to read Liquibase changelog file: " + targetChangelogPath,
+                    "Unable to read Liquibase changelog file: " + changelogFilePath,
+                    e
+            );
+        }
+    }
+
+    private List<Path> getApplicationChangelogFiles() {
+        List<Path> generatedFiles = getGeneratedChangelogFiles();
+
+        return Stream.concat(
+                        Stream.of(Path.of(applicationChangelogPath)),
+                        generatedFiles.stream()
+                )
+                .toList();
+    }
+
+    private List<Path> getGeneratedChangelogFiles() {
+        Path generatedDirectory = Path.of(generatedChangelogDirectory);
+
+        if (!Files.exists(generatedDirectory)) {
+            return List.of();
+        }
+
+        try (Stream<Path> files = Files.list(generatedDirectory)) {
+            return files
+                    .filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().toLowerCase().endsWith(".sql"))
+                    .sorted(Comparator.comparing(path -> path.getFileName().toString()))
+                    .toList();
+
+        } catch (IOException e) {
+            throw new IllegalStateException(
+                    "Unable to scan generated changelog directory: " + generatedChangelogDirectory,
                     e
             );
         }
