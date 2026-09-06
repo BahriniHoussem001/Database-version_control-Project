@@ -13,4 +13,6 @@ public class GeneratedMigrationResponse {
     private String filename;
     private String relativePath;
     private String message;
+    private String artifactBucket;
+    private String artifactKey;
 }

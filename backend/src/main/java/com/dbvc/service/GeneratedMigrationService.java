@@ -25,6 +25,8 @@ public class GeneratedMigrationService {
     private static final Pattern GENERATED_FILENAME_PATTERN =
             Pattern.compile("V(\\d+)__.*\\.sql", Pattern.CASE_INSENSITIVE);
 
+    private final ArtifactStorageService artifactStorageService;
+
     @Value("${dbvc.liquibase.generated-changelog-directory:../liquibase/changelog/generated}")
     private String generatedChangelogDirectory;
 
@@ -69,11 +71,21 @@ public class GeneratedMigrationService {
                     StandardOpenOption.CREATE_NEW
             );
 
+            String artifactKey = "generated/" + filename;
+
+            artifactStorageService.uploadTextArtifact(
+                    artifactKey,
+                    content,
+                    "text/x-sql"
+            );
+
             return new GeneratedMigrationResponse(
                     changesetId,
                     filename,
                     "liquibase/changelog/generated/" + filename,
-                    "Generated migration file created successfully"
+                    artifactStorageService.getBucket(),
+                    artifactKey,
+                    "Generated migration file created locally and archived in artifact storage"
             );
 
         } catch (IOException e) {
