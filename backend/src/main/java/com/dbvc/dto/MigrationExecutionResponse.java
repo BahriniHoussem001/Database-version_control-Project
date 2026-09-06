@@ -11,32 +11,33 @@ import lombok.NoArgsConstructor;
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
-
 public class MigrationExecutionResponse {
-	 private Long id;
-	 
-	    private String environment;
-	    private String requestType;
-	    private String priority;
-	    private String reason;
 
-	    private String status;
+    private Long id;
 
-	    private String command;
-	    private Integer exitCode;
+    private String environment;
+    private String requestType;
+    private String executionMode;
+    private String priority;
+    private String reason;
 
-	    private String output;
-	    private String error;
-	    private String validationSummary;
+    private String status;
 
-	    private String requestedBy;
+    private String command;
+    private Integer exitCode;
 
-	    private LocalDateTime requestedAt;
-	    private LocalDateTime startedAt;
-	    private LocalDateTime finishedAt;
+    private String output;
+    private String error;
+    private String validationSummary;
 
-	    private Long durationMs;
-	
-	
+    private String logArtifactBucket;
+    private String logArtifactKey;
 
+    private String requestedBy;
+
+    private LocalDateTime requestedAt;
+    private LocalDateTime startedAt;
+    private LocalDateTime finishedAt;
+
+    private Long durationMs;
 }

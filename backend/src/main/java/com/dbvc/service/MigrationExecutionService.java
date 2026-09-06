@@ -16,6 +16,7 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.sql.PreparedStatement;
 import java.sql.Timestamp;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -25,6 +26,7 @@ public class MigrationExecutionService {
     private final JdbcTemplate jdbcTemplate;
     private final MigrationValidationService migrationValidationService;
     private final EnvironmentPromotionPolicyService environmentPromotionPolicyService;
+    private final ArtifactStorageService artifactStorageService;
 
     @Value("${dbvc.project-root}")
     private String projectRoot;
@@ -32,6 +34,7 @@ public class MigrationExecutionService {
     public MigrationExecutionResponse createExecutionRequest(CreateMigrationExecutionRequest request) {
         String environment = normalizeEnvironment(request.getEnvironment());
         String requestType = normalizeRequestType(request.getRequestType());
+        String executionMode = normalizeExecutionMode(request.getExecutionMode());
         String priority = normalizePriority(request.getPriority());
         String reason = cleanText(request.getReason());
         String requestedBy = cleanText(request.getRequestedBy());
@@ -48,13 +51,14 @@ public class MigrationExecutionService {
             throw new IllegalArgumentException("Reason is required when priority is URGENT");
         }
 
-        String command = resolveCommand(environment, requestType);
-        String validationSummary = "Request accepted and queued";
+        String command = resolveCommand(environment, requestType, executionMode);
+        String validationSummary = "Request accepted and queued. Execution mode: " + executionMode;
 
         String sql = """
                 INSERT INTO migration_execution_request (
                     environment,
                     request_type,
+                    execution_mode,
                     priority,
                     reason,
                     status,
@@ -63,7 +67,7 @@ public class MigrationExecutionService {
                     requested_by,
                     requested_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """;
 
         KeyHolder keyHolder = new GeneratedKeyHolder();
@@ -74,12 +78,13 @@ public class MigrationExecutionService {
             PreparedStatement ps = connection.prepareStatement(sql, new String[]{"ID"});
             ps.setString(1, environment);
             ps.setString(2, requestType);
-            ps.setString(3, priority);
-            ps.setString(4, reason);
-            ps.setString(5, "QUEUED");
-            ps.setString(6, command);
-            ps.setString(7, validationSummary);
-            ps.setString(8, finalRequestedBy);
+            ps.setString(3, executionMode);
+            ps.setString(4, priority);
+            ps.setString(5, reason);
+            ps.setString(6, "QUEUED");
+            ps.setString(7, command);
+            ps.setString(8, validationSummary);
+            ps.setString(9, finalRequestedBy);
             return ps;
         }, keyHolder);
 
@@ -176,6 +181,20 @@ public class MigrationExecutionService {
 
             String finalStatus = result.isSuccess() ? "SUCCESS" : "FAILED";
 
+            ArtifactArchiveResult archiveResult = archiveExecutionLogSafely(
+                    nextRequestId,
+                    request,
+                    result,
+                    finalStatus,
+                    validationSummary,
+                    durationMs
+            );
+
+            String finalValidationSummary = appendArchiveWarning(
+                    validationSummary,
+                    archiveResult.warningMessage()
+            );
+
             jdbcTemplate.update(
                     """
                     UPDATE migration_execution_request
@@ -184,6 +203,8 @@ public class MigrationExecutionService {
                         output = ?,
                         error = ?,
                         validation_summary = ?,
+                        log_artifact_bucket = ?,
+                        log_artifact_key = ?,
                         finished_at = CURRENT_TIMESTAMP,
                         duration_ms = ?
                     WHERE id = ?
@@ -192,7 +213,9 @@ public class MigrationExecutionService {
                     result.getExitCode(),
                     result.getOutput(),
                     result.getError(),
-                    validationSummary,
+                    finalValidationSummary,
+                    archiveResult.logArtifactBucket(),
+                    archiveResult.logArtifactKey(),
                     durationMs,
                     nextRequestId
             );
@@ -202,16 +225,48 @@ public class MigrationExecutionService {
         } catch (Exception e) {
             long durationMs = System.currentTimeMillis() - startTime;
 
+            LiquibaseExecutionResult failedResult = LiquibaseExecutionResult.builder()
+                    .success(false)
+                    .command(request.getCommand())
+                    .exitCode(-1)
+                    .output(null)
+                    .error(safeExceptionMessage(e))
+                    .build();
+
+            String validationSummary = "Execution failed before successful Liquibase completion";
+
+            ArtifactArchiveResult archiveResult = archiveExecutionLogSafely(
+                    nextRequestId,
+                    request,
+                    failedResult,
+                    "FAILED",
+                    validationSummary,
+                    durationMs
+            );
+
+            String finalValidationSummary = appendArchiveWarning(
+                    validationSummary,
+                    archiveResult.warningMessage()
+            );
+
             jdbcTemplate.update(
                     """
                     UPDATE migration_execution_request
                     SET status = 'FAILED',
+                        exit_code = ?,
                         error = ?,
+                        validation_summary = ?,
+                        log_artifact_bucket = ?,
+                        log_artifact_key = ?,
                         finished_at = CURRENT_TIMESTAMP,
                         duration_ms = ?
                     WHERE id = ?
                     """,
-                    e.getMessage(),
+                    failedResult.getExitCode(),
+                    failedResult.getError(),
+                    finalValidationSummary,
+                    archiveResult.logArtifactBucket(),
+                    archiveResult.logArtifactKey(),
                     durationMs,
                     nextRequestId
             );
@@ -277,6 +332,7 @@ public class MigrationExecutionService {
                 .id(rs.getLong("id"))
                 .environment(rs.getString("environment"))
                 .requestType(rs.getString("request_type"))
+                .executionMode(rs.getString("execution_mode"))
                 .priority(rs.getString("priority"))
                 .reason(rs.getString("reason"))
                 .status(rs.getString("status"))
@@ -285,12 +341,131 @@ public class MigrationExecutionService {
                 .output(rs.getString("output"))
                 .error(rs.getString("error"))
                 .validationSummary(rs.getString("validation_summary"))
+                .logArtifactBucket(rs.getString("log_artifact_bucket"))
+                .logArtifactKey(rs.getString("log_artifact_key"))
                 .requestedBy(rs.getString("requested_by"))
                 .requestedAt(toLocalDateTime(rs.getTimestamp("requested_at")))
                 .startedAt(toLocalDateTime(rs.getTimestamp("started_at")))
                 .finishedAt(toLocalDateTime(rs.getTimestamp("finished_at")))
                 .durationMs(rs.getObject("duration_ms") != null ? rs.getLong("duration_ms") : null)
                 .build();
+    }
+
+    private ArtifactArchiveResult archiveExecutionLogSafely(
+            Long executionId,
+            MigrationExecutionResponse request,
+            LiquibaseExecutionResult result,
+            String finalStatus,
+            String validationSummary,
+            Long durationMs
+    ) {
+        String artifactKey = buildExecutionLogArtifactKey(executionId, request.getEnvironment());
+        String logContent = buildExecutionLogContent(
+                executionId,
+                request,
+                result,
+                finalStatus,
+                validationSummary,
+                durationMs
+        );
+
+        try {
+            String uploadedKey = artifactStorageService.uploadTextArtifact(
+                    artifactKey,
+                    logContent,
+                    "text/plain"
+            );
+
+            if (uploadedKey == null) {
+                return new ArtifactArchiveResult(
+                        null,
+                        null,
+                        "Artifact storage is disabled. Execution log was not archived."
+                );
+            }
+
+            return new ArtifactArchiveResult(
+                    artifactStorageService.getBucket(),
+                    uploadedKey,
+                    null
+            );
+
+        } catch (Exception e) {
+            return new ArtifactArchiveResult(
+                    null,
+                    null,
+                    "Artifact archive failed: " + safeExceptionMessage(e)
+            );
+        }
+    }
+
+    private String buildExecutionLogArtifactKey(Long executionId, String environment) {
+        return "executions/"
+                + environment
+                + "/execution-"
+                + executionId
+                + ".log";
+    }
+
+    private String buildExecutionLogContent(
+            Long executionId,
+            MigrationExecutionResponse request,
+            LiquibaseExecutionResult result,
+            String finalStatus,
+            String validationSummary,
+            Long durationMs
+    ) {
+        String lineSeparator = System.lineSeparator();
+
+        StringBuilder builder = new StringBuilder();
+
+        builder.append("DBVC Migration Execution Log").append(lineSeparator);
+        builder.append("============================").append(lineSeparator);
+        builder.append("Execution ID: ").append(executionId).append(lineSeparator);
+        builder.append("Environment: ").append(valueOrEmpty(request.getEnvironment())).append(lineSeparator);
+        builder.append("Request Type: ").append(valueOrEmpty(request.getRequestType())).append(lineSeparator);
+        builder.append("Execution Mode: ").append(valueOrEmpty(request.getExecutionMode())).append(lineSeparator);
+        builder.append("Priority: ").append(valueOrEmpty(request.getPriority())).append(lineSeparator);
+        builder.append("Requested By: ").append(valueOrEmpty(request.getRequestedBy())).append(lineSeparator);
+        builder.append("Requested At: ").append(valueOrEmpty(request.getRequestedAt())).append(lineSeparator);
+        builder.append("Archived At: ").append(LocalDateTime.now()).append(lineSeparator);
+        builder.append("Final Status: ").append(valueOrEmpty(finalStatus)).append(lineSeparator);
+        builder.append("Exit Code: ").append(result.getExitCode()).append(lineSeparator);
+        builder.append("Duration Ms: ").append(valueOrEmpty(durationMs)).append(lineSeparator);
+        builder.append(lineSeparator);
+
+        builder.append("Command").append(lineSeparator);
+        builder.append("-------").append(lineSeparator);
+        builder.append(valueOrEmpty(request.getCommand())).append(lineSeparator);
+        builder.append(lineSeparator);
+
+        builder.append("Validation Summary").append(lineSeparator);
+        builder.append("------------------").append(lineSeparator);
+        builder.append(valueOrEmpty(validationSummary)).append(lineSeparator);
+        builder.append(lineSeparator);
+
+        builder.append("Output").append(lineSeparator);
+        builder.append("------").append(lineSeparator);
+        builder.append(valueOrEmpty(result.getOutput())).append(lineSeparator);
+        builder.append(lineSeparator);
+
+        builder.append("Error").append(lineSeparator);
+        builder.append("-----").append(lineSeparator);
+        builder.append(valueOrEmpty(result.getError())).append(lineSeparator);
+
+        return builder.toString();
+    }
+
+    private String appendArchiveWarning(String validationSummary, String warningMessage) {
+        if (warningMessage == null || warningMessage.isBlank()) {
+            return validationSummary;
+        }
+
+        if (validationSummary == null || validationSummary.isBlank()) {
+            return warningMessage;
+        }
+
+        return validationSummary + System.lineSeparator() + warningMessage;
     }
 
     private Long findNextQueuedRequestId() {
@@ -339,6 +514,32 @@ public class MigrationExecutionService {
         List<MigrationValidationResult> validationResults =
                 migrationValidationService.validatePendingMigrationsByEnvironment(request.getEnvironment());
 
+        if (validationResults.isEmpty()) {
+            throw new IllegalStateException(
+                    "No pending migration found for environment: " + request.getEnvironment()
+            );
+        }
+
+        if ("NEXT".equals(request.getExecutionMode())) {
+            MigrationValidationResult nextPendingMigration = validationResults.get(0);
+
+            if (!"VALID".equals(nextPendingMigration.getStatus())) {
+                throw new IllegalStateException(
+                        "Next pending migration validation failed for environment: "
+                                + request.getEnvironment()
+                                + ". Please check /api/environments/"
+                                + request.getEnvironment()
+                                + "/migrations/pending/validation before applying."
+                );
+            }
+
+            return "Validation passed before execution for environment: "
+                    + request.getEnvironment()
+                    + ". Execution mode: NEXT pending migration only. "
+                    + "Total pending migrations at validation time: "
+                    + validationResults.size();
+        }
+
         boolean hasValidationProblems = validationResults.stream()
                 .anyMatch(result -> !"VALID".equals(result.getStatus()));
 
@@ -348,13 +549,14 @@ public class MigrationExecutionService {
                             + request.getEnvironment()
                             + ". Please check /api/environments/"
                             + request.getEnvironment()
-                            + "/migrations/pending/validation before applying."
+                            + "/migrations/pending/validation before applying all pending migrations."
             );
         }
 
         return "Validation passed before execution for environment: "
                 + request.getEnvironment()
-                + ". Pending changesets checked: "
+                + ". Execution mode: ALL pending migrations. "
+                + "Pending changesets checked: "
                 + validationResults.size();
     }
 
@@ -417,7 +619,7 @@ public class MigrationExecutionService {
                     .command(command)
                     .exitCode(-1)
                     .output(null)
-                    .error(e.getMessage())
+                    .error(safeExceptionMessage(e))
                     .build();
         }
     }
@@ -435,11 +637,15 @@ public class MigrationExecutionService {
         return normalizedOutput.contains("MIGRATION_EXECUTION_REQUEST");
     }
 
-    private String resolveCommand(String environment, String requestType) {
+    private String resolveCommand(String environment, String requestType, String executionMode) {
         String defaultsFile = resolveEnvironmentDefaultsFile(environment);
 
         if ("UPDATE".equals(requestType)) {
-            return "docker compose run --rm liquibase --defaults-file=" + defaultsFile + " update";
+            if ("ALL".equals(executionMode)) {
+                return "docker compose run --rm liquibase --defaults-file=" + defaultsFile + " update";
+            }
+
+            return "docker compose run --rm liquibase --defaults-file=" + defaultsFile + " update-count --count=1";
         }
 
         if ("ROLLBACK".equals(requestType)) {
@@ -505,6 +711,22 @@ public class MigrationExecutionService {
         return value;
     }
 
+    private String normalizeExecutionMode(String executionMode) {
+        String value = cleanText(executionMode);
+
+        if (value == null) {
+            return "NEXT";
+        }
+
+        value = value.toUpperCase();
+
+        if (!"NEXT".equals(value) && !"ALL".equals(value)) {
+            throw new IllegalArgumentException("executionMode must be NEXT or ALL");
+        }
+
+        return value;
+    }
+
     private String normalizePriority(String priority) {
         String value = cleanText(priority);
 
@@ -550,5 +772,24 @@ public class MigrationExecutionService {
         }
 
         return value.trim();
+    }
+
+    private String safeExceptionMessage(Exception e) {
+        if (e.getMessage() == null || e.getMessage().isBlank()) {
+            return e.getClass().getSimpleName();
+        }
+
+        return e.getMessage();
+    }
+
+    private String valueOrEmpty(Object value) {
+        return value != null ? value.toString() : "";
+    }
+
+    private record ArtifactArchiveResult(
+            String logArtifactBucket,
+            String logArtifactKey,
+            String warningMessage
+    ) {
     }
 }

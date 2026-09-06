@@ -33,8 +33,22 @@ const promotionStatuses = ref([])
 const showApplyModal = ref(false)
 const applyingMigrations = ref(false)
 
+const executionModeOptions = [
+  {
+    value: 'NEXT',
+    title: 'Apply next pending migration only',
+    description: 'Safest option. Applies only the first pending changeset in Liquibase order.',
+  },
+  {
+    value: 'ALL',
+    title: 'Apply all pending migrations',
+    description: 'Advanced option. Applies every currently pending changeset in Liquibase order.',
+  },
+]
+
 const applyForm = ref({
   environment: 'DEV',
+  executionMode: 'NEXT',
   reason: '',
   requestedBy: 'houssem',
 })
@@ -55,6 +69,28 @@ const modalEnvironmentRow = computed(() => {
 })
 
 const modalPendingMigrations = computed(() => modalEnvironmentRow.value?.pending ?? 0)
+
+const modalNextPendingMigration = computed(() => {
+  const nextMigration = modalEnvironmentRow.value?.pendingMigrations?.[0]
+  return pendingMigrationLabel(nextMigration)
+})
+
+const isApplyAllMode = computed(() => applyForm.value.executionMode === 'ALL')
+
+const applyModalTitle = computed(() => {
+  return isApplyAllMode.value ? 'Apply All Pending Migrations' : 'Apply Next Pending Migration'
+})
+
+const applyModalDescription = computed(() => {
+  return isApplyAllMode.value
+    ? 'Apply all pending Liquibase changesets to the selected environment.'
+    : 'Apply only the next pending Liquibase changeset to the selected environment.'
+})
+
+const applyButtonLabel = computed(() => {
+  if (applyingMigrations.value) return 'Applying...'
+  return isApplyAllMode.value ? 'Apply All Migrations' : 'Apply Next Migration'
+})
 
 const canApplyMigrations = computed(() => {
   return (
@@ -86,6 +122,21 @@ function environmentStatusFromPending(pendingCount) {
   return pendingCount > 0 ? `Pending ${pendingCount}` : 'Up to date'
 }
 
+function pendingMigrationLabel(migration) {
+  if (!migration) return null
+
+  return (
+    migration.changesetId ||
+    migration.changeSetId ||
+    migration.id ||
+    migration.description ||
+    migration.filename ||
+    migration.fileName ||
+    migration.path ||
+    'Next pending changeset'
+  )
+}
+
 function statusClass(status) {
   if (!status) return 'muted'
 
@@ -106,9 +157,13 @@ function statusClass(status) {
   return 'muted'
 }
 
-function executionActionLabel(requestType) {
-  if (requestType === 'UPDATE') return 'Apply migrations'
+function executionActionLabel(requestType, executionMode) {
+  if (requestType === 'UPDATE') {
+    return executionMode === 'ALL' ? 'Apply all migrations' : 'Apply next migration'
+  }
+
   if (requestType === 'ROLLBACK') return 'Rollback'
+
   return requestType || 'Unknown action'
 }
 
@@ -124,6 +179,14 @@ function getApplyBlockedReason(environment) {
   return getPromotionStatus(environment)?.blockedReason || null
 }
 
+function buildApplyReason(environment, executionMode) {
+  if (executionMode === 'ALL') {
+    return `Apply all pending migrations to ${environment}`
+  }
+
+  return `Apply next pending migration to ${environment}`
+}
+
 async function loadEnvironmentRows() {
   const rows = await Promise.all(
     environmentNames.map(async (environment) => {
@@ -133,13 +196,14 @@ async function loadEnvironmentRows() {
       ])
 
       const summary = summaryResponse.data
-      const pending = pendingResponse.data
+      const pendingMigrations = Array.isArray(pendingResponse.data) ? pendingResponse.data : []
 
       return {
         name: environment,
         migrations: summary.totalExecutedMigrations ?? 0,
-        pending: pending.length,
-        status: environmentStatusFromPending(pending.length),
+        pending: pendingMigrations.length,
+        pendingMigrations,
+        status: environmentStatusFromPending(pendingMigrations.length),
         latestMigration: summary.latestMigrationId ?? '—',
         lastUpdate: formatDate(summary.latestExecutedAt),
       }
@@ -199,7 +263,8 @@ function openApplyModal() {
 
   applyForm.value = {
     environment: selectedEnvironment.value,
-    reason: `Apply pending migrations to ${selectedEnvironment.value}`,
+    executionMode: 'NEXT',
+    reason: buildApplyReason(selectedEnvironment.value, 'NEXT'),
     requestedBy: currentUser.value?.username || 'SYSTEM',
   }
 
@@ -211,19 +276,29 @@ function closeApplyModal() {
 }
 
 function handleApplyEnvironmentChange() {
-  applyForm.value.reason = `Apply pending migrations to ${applyForm.value.environment}`
+  applyForm.value.reason = buildApplyReason(
+    applyForm.value.environment,
+    applyForm.value.executionMode
+  )
+}
+
+function handleExecutionModeChange() {
+  applyForm.value.reason = buildApplyReason(
+    applyForm.value.environment,
+    applyForm.value.executionMode
+  )
 }
 
 async function submitApplyMigrations() {
   if (modalPendingMigrations.value === 0) {
-    errorMessage.value = `No pending migrations to apply on ${applyForm.value.environment}.`
+    errorMessage.value = `No pending migration to apply on ${applyForm.value.environment}.`
     return
   }
 
   if (!canApplyEnvironment(applyForm.value.environment)) {
     errorMessage.value =
       getApplyBlockedReason(applyForm.value.environment) ||
-      `Migrations cannot be applied to ${applyForm.value.environment}.`
+      `Pending migrations cannot be applied to ${applyForm.value.environment}.`
     return
   }
 
@@ -235,12 +310,16 @@ async function submitApplyMigrations() {
     await createMigrationExecutionRequest({
       environment: applyForm.value.environment,
       requestType: 'UPDATE',
+      executionMode: applyForm.value.executionMode,
       priority: 'NORMAL',
       reason: applyForm.value.reason,
       requestedBy: applyForm.value.requestedBy,
     })
 
-    successMessage.value = `Migration application queued for ${applyForm.value.environment}.`
+    successMessage.value = isApplyAllMode.value
+      ? `All pending migrations execution queued for ${applyForm.value.environment}.`
+      : `Next pending migration execution queued for ${applyForm.value.environment}.`
+
     showApplyModal.value = false
 
     await loadDashboard()
@@ -253,7 +332,7 @@ async function submitApplyMigrations() {
       error.response?.data?.message ||
       error.response?.data?.error ||
       error.message ||
-      'Unable to apply pending migrations'
+      'Unable to queue migration execution'
   } finally {
     applyingMigrations.value = false
   }
@@ -287,7 +366,7 @@ onMounted(async () => {
           class="primary-button"
           @click="openApplyModal"
         >
-          Apply Pending Migrations
+          Apply Migrations
         </button>
       </div>
     </div>
@@ -406,7 +485,10 @@ onMounted(async () => {
             class="execution-item"
           >
             <div>
-              <strong>{{ execution.environment }} · {{ executionActionLabel(execution.requestType) }}</strong>
+              <strong>
+                {{ execution.environment }} ·
+                {{ executionActionLabel(execution.requestType, execution.executionMode) }}
+              </strong>
               <span>Requested by {{ execution.requestedBy }}</span>
             </div>
             <div class="execution-meta">
@@ -470,8 +552,8 @@ onMounted(async () => {
       <div class="modal-card">
         <div class="modal-header">
           <div>
-            <h3>Apply Pending Migrations</h3>
-            <p>Apply existing Liquibase changesets to a selected environment.</p>
+            <h3>{{ applyModalTitle }}</h3>
+            <p>{{ applyModalDescription }}</p>
           </div>
           <button class="icon-button" @click="closeApplyModal">×</button>
         </div>
@@ -483,8 +565,16 @@ onMounted(async () => {
           </span>
         </div>
 
+        <p
+          v-if="!isApplyAllMode && modalNextPendingMigration"
+          class="form-help full-width"
+        >
+          Next to apply:
+          <strong>{{ modalNextPendingMigration }}</strong>
+        </p>
+
         <div v-if="modalPendingMigrations === 0" class="modal-warning">
-          This environment is already up to date. There are no pending migrations to apply.
+          This environment is already up to date. There is no pending migration to apply.
         </div>
 
         <div
@@ -514,16 +604,46 @@ onMounted(async () => {
             <input v-model="applyForm.requestedBy" type="text" disabled />
           </label>
 
+          <div class="full-width execution-mode-group">
+            <span class="field-title">Execution Mode</span>
+
+            <label
+              v-for="option in executionModeOptions"
+              :key="option.value"
+              class="execution-mode-option"
+              :class="{ active: applyForm.executionMode === option.value }"
+            >
+              <input
+                v-model="applyForm.executionMode"
+                type="radio"
+                name="executionMode"
+                :value="option.value"
+                @change="handleExecutionModeChange"
+              />
+
+              <div>
+                <strong>{{ option.title }}</strong>
+                <span>{{ option.description }}</span>
+              </div>
+            </label>
+          </div>
+
+          <div
+            v-if="isApplyAllMode && modalPendingMigrations > 1"
+            class="modal-warning full-width"
+          >
+            Advanced mode selected. This will apply all
+            {{ modalPendingMigrations }} pending migrations in Liquibase order.
+          </div>
+
           <label class="full-width">
             Reason
             <textarea v-model="applyForm.reason" rows="4"></textarea>
           </label>
 
-          
-
           <p class="form-help full-width">
-            This action queues a controlled Liquibase update. The backend validates pending migrations,
-            runs the update, and stores execution logs.
+            This action queues a controlled Liquibase update. The backend validates the selected
+            execution mode, applies changesets in Liquibase order, and stores execution logs.
           </p>
 
           <div class="modal-actions">
@@ -531,7 +651,7 @@ onMounted(async () => {
               Cancel
             </button>
             <button type="submit" class="primary-button" :disabled="!canApplyMigrations">
-              {{ applyingMigrations ? 'Applying...' : 'Apply Migrations' }}
+              {{ applyButtonLabel }}
             </button>
           </div>
         </form>
