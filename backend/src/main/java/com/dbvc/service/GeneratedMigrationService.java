@@ -79,14 +79,14 @@ public class GeneratedMigrationService {
                     "text/x-sql"
             );
 
-            return new GeneratedMigrationResponse(
-                    changesetId,
-                    filename,
-                    "liquibase/changelog/generated/" + filename,
-                    artifactStorageService.getBucket(),
-                    artifactKey,
-                    "Generated migration file created locally and archived in artifact storage"
-            );
+            return GeneratedMigrationResponse.builder()
+                    .changesetId(changesetId)
+                    .filename(filename)
+                    .relativePath("liquibase/changelog/generated/" + filename)
+                    .artifactBucket(artifactStorageService.getBucket())
+                    .artifactKey(artifactKey)
+                    .message("Generated migration file created locally and archived in artifact storage")
+                    .build();
 
         } catch (IOException e) {
             throw new IllegalStateException("Unable to create generated migration file: " + e.getMessage(), e);

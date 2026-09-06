@@ -3,7 +3,7 @@ import { computed, inject, ref } from 'vue'
 import { FileText, RefreshCw } from 'lucide-vue-next'
 import { createGeneratedMigration } from '../services/api'
 
-const currentUser = inject('currentUser')
+const currentUser = inject('currentUser', ref(null))
 
 const loading = ref(false)
 const errorMessage = ref(null)
@@ -24,6 +24,13 @@ const canSubmit = computed(() => {
     form.value.sql.trim() &&
     form.value.rollbackSql.trim() &&
     !loading.value
+  )
+})
+
+const hasArtifactInfo = computed(() => {
+  return Boolean(
+    generatedMigration.value?.artifactBucket &&
+    generatedMigration.value?.artifactKey
   )
 })
 
@@ -60,7 +67,7 @@ async function submitGeneratedMigration() {
     })
 
     generatedMigration.value = response.data
-    successMessage.value = 'Migration file generated successfully.'
+    successMessage.value = 'Migration file generated successfully and archived in artifact storage.'
   } catch (error) {
     errorMessage.value =
       error.response?.data?.message ||
@@ -99,7 +106,7 @@ async function submitGeneratedMigration() {
             <h3>New Migration</h3>
             <p>
               The platform will generate a separate Liquibase formatted SQL file inside
-              <strong>liquibase/changelog/generated</strong>.
+              <strong>liquibase/changelog/generated</strong> and archive a copy in MinIO.
             </p>
           </div>
 
@@ -166,7 +173,7 @@ async function submitGeneratedMigration() {
         <div class="panel-header">
           <div>
             <h3>Generated Result</h3>
-            <p>Details returned by the backend after file creation.</p>
+            <p>Details returned by the backend after file creation and artifact archiving.</p>
           </div>
         </div>
 
@@ -194,6 +201,29 @@ async function submitGeneratedMigration() {
               <strong>Relative Path</strong>
               <span>{{ generatedMigration.relativePath }}</span>
             </div>
+          </div>
+
+          <div v-if="hasArtifactInfo" class="artifact-box">
+            <div class="artifact-header">
+              <span class="artifact-badge">Archived in MinIO</span>
+            </div>
+
+            <div class="artifact-row">
+              <span>Bucket</span>
+              <strong>{{ generatedMigration.artifactBucket }}</strong>
+            </div>
+
+            <div class="artifact-row">
+              <span>Object key</span>
+              <strong>{{ generatedMigration.artifactKey }}</strong>
+            </div>
+
+            <p class="artifact-help">
+              You can find this file in MinIO Console under
+              <strong>{{ generatedMigration.artifactBucket }}</strong>
+              →
+              <strong>{{ generatedMigration.artifactKey }}</strong>.
+            </p>
           </div>
 
           <p class="form-help">

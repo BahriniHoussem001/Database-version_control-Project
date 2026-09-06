@@ -973,3 +973,59 @@ td {
   background: #f8fafc;
   border-color: #cbd5e1;
 }
+
+.artifact-box {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: #eff6ff;
+}
+
+.artifact-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.85rem;
+}
+
+.artifact-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  background: #dbeafe;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #1d4ed8;
+}
+
+.artifact-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid rgba(37, 99, 235, 0.14);
+  font-size: 0.9rem;
+}
+
+.artifact-row:last-of-type {
+  border-bottom: none;
+}
+
+.artifact-row span {
+  color: #64748b;
+}
+
+.artifact-row strong {
+  color: #0f172a;
+  text-align: right;
+  word-break: break-all;
+}
+
+.artifact-help {
+  margin: 0.85rem 0 0;
+  font-size: 0.85rem;
+  color: #475569;
+  line-height: 1.5;
+}
