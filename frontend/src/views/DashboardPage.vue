@@ -36,13 +36,11 @@ const applyingMigrations = ref(false)
 const executionModeOptions = [
   {
     value: 'NEXT',
-    title: 'Apply next pending migration only',
-    description: 'Safest option. Applies only the first pending changeset in Liquibase order.',
+    title: 'Apply next',
   },
   {
     value: 'ALL',
-    title: 'Apply all pending migrations',
-    description: 'Advanced option. Applies every currently pending changeset in Liquibase order.',
+    title: 'Apply all',
   },
 ]
 
@@ -75,7 +73,63 @@ const modalNextPendingMigration = computed(() => {
   return pendingMigrationLabel(nextMigration)
 })
 
+const selectedPromotionStatus = computed(() => {
+  return getPromotionStatus(applyForm.value.environment)
+})
+
 const isApplyAllMode = computed(() => applyForm.value.executionMode === 'ALL')
+
+const canApplyNextMode = computed(() => {
+  return selectedPromotionStatus.value?.canApply === true
+})
+
+const canApplyAllMode = computed(() => {
+  return selectedPromotionStatus.value?.canApplyAll === true
+})
+
+const canApplySelectedExecutionMode = computed(() => {
+  if (isApplyAllMode.value) {
+    return canApplyAllMode.value
+  }
+
+  return canApplyNextMode.value
+})
+
+const selectedExecutionModeBlockedReason = computed(() => {
+  if (!selectedPromotionStatus.value) {
+    return 'Promotion status is not available yet.'
+  }
+
+  if (modalPendingMigrations.value === 0) {
+    return null
+  }
+
+  if (isApplyAllMode.value) {
+    return selectedPromotionStatus.value.applyAllBlockedReason || null
+  }
+
+  return selectedPromotionStatus.value.blockedReason || null
+})
+
+const executionModeHelpMessage = computed(() => {
+  if (modalPendingMigrations.value === 0) {
+    return 'This environment is already up to date.'
+  }
+
+  if (selectedExecutionModeBlockedReason.value) {
+    return selectedExecutionModeBlockedReason.value
+  }
+
+  if (isApplyAllMode.value) {
+    return `This will apply all ${modalPendingMigrations.value} pending migration${
+      modalPendingMigrations.value === 1 ? '' : 's'
+    } in Liquibase order.`
+  }
+
+  return modalNextPendingMigration.value
+    ? `This will apply only the next migration: ${modalNextPendingMigration.value}.`
+    : 'This will apply only the next pending migration.'
+})
 
 const applyModalTitle = computed(() => {
   return isApplyAllMode.value ? 'Apply All Pending Migrations' : 'Apply Next Pending Migration'
@@ -83,19 +137,19 @@ const applyModalTitle = computed(() => {
 
 const applyModalDescription = computed(() => {
   return isApplyAllMode.value
-    ? 'Apply all pending Liquibase changesets to the selected environment.'
-    : 'Apply only the next pending Liquibase changeset to the selected environment.'
+    ? 'Apply all pending changesets only when the previous environments are fully updated.'
+    : 'Apply only the next pending changeset allowed by the promotion order.'
 })
 
 const applyButtonLabel = computed(() => {
   if (applyingMigrations.value) return 'Applying...'
-  return isApplyAllMode.value ? 'Apply All Migrations' : 'Apply Next Migration'
+  return isApplyAllMode.value ? 'Apply All' : 'Apply Next'
 })
 
 const canApplyMigrations = computed(() => {
   return (
     modalPendingMigrations.value > 0 &&
-    canApplyEnvironment(applyForm.value.environment) &&
+    canApplySelectedExecutionMode.value &&
     !applyingMigrations.value
   )
 })
@@ -171,12 +225,22 @@ function getPromotionStatus(environment) {
   return promotionStatuses.value.find((item) => item.environment === environment)
 }
 
-function canApplyEnvironment(environment) {
-  return getPromotionStatus(environment)?.canApply === true
+function canApplyAnyMode(environment) {
+  const status = getPromotionStatus(environment)
+
+  return status?.canApply === true || status?.canApplyAll === true
 }
 
-function getApplyBlockedReason(environment) {
-  return getPromotionStatus(environment)?.blockedReason || null
+function canSelectExecutionMode(executionMode) {
+  if (modalPendingMigrations.value === 0) {
+    return false
+  }
+
+  if (executionMode === 'ALL') {
+    return canApplyAllMode.value
+  }
+
+  return canApplyNextMode.value
 }
 
 function buildApplyReason(environment, executionMode) {
@@ -185,6 +249,28 @@ function buildApplyReason(environment, executionMode) {
   }
 
   return `Apply next pending migration to ${environment}`
+}
+
+function normalizeExecutionModeForEnvironment() {
+  if (applyForm.value.executionMode === 'ALL' && !canApplyAllMode.value) {
+    applyForm.value.executionMode = 'NEXT'
+  }
+
+  if (applyForm.value.executionMode === 'NEXT' && !canApplyNextMode.value && canApplyAllMode.value) {
+    applyForm.value.executionMode = 'ALL'
+  }
+}
+
+function selectExecutionMode(executionMode) {
+  if (!canSelectExecutionMode(executionMode)) {
+    return
+  }
+
+  applyForm.value.executionMode = executionMode
+  applyForm.value.reason = buildApplyReason(
+    applyForm.value.environment,
+    applyForm.value.executionMode
+  )
 }
 
 async function loadEnvironmentRows() {
@@ -268,6 +354,13 @@ function openApplyModal() {
     requestedBy: currentUser.value?.username || 'SYSTEM',
   }
 
+  normalizeExecutionModeForEnvironment()
+
+  applyForm.value.reason = buildApplyReason(
+    applyForm.value.environment,
+    applyForm.value.executionMode
+  )
+
   showApplyModal.value = true
 }
 
@@ -276,13 +369,8 @@ function closeApplyModal() {
 }
 
 function handleApplyEnvironmentChange() {
-  applyForm.value.reason = buildApplyReason(
-    applyForm.value.environment,
-    applyForm.value.executionMode
-  )
-}
+  normalizeExecutionModeForEnvironment()
 
-function handleExecutionModeChange() {
   applyForm.value.reason = buildApplyReason(
     applyForm.value.environment,
     applyForm.value.executionMode
@@ -295,10 +383,10 @@ async function submitApplyMigrations() {
     return
   }
 
-  if (!canApplyEnvironment(applyForm.value.environment)) {
+  if (!canApplySelectedExecutionMode.value) {
     errorMessage.value =
-      getApplyBlockedReason(applyForm.value.environment) ||
-      `Pending migrations cannot be applied to ${applyForm.value.environment}.`
+      selectedExecutionModeBlockedReason.value ||
+      `Selected execution mode cannot be applied to ${applyForm.value.environment}.`
     return
   }
 
@@ -549,7 +637,7 @@ onMounted(async () => {
     </section>
 
     <div v-if="showApplyModal" class="modal-backdrop">
-      <div class="modal-card">
+      <div class="modal-card compact-apply-modal">
         <div class="modal-header">
           <div>
             <h3>{{ applyModalTitle }}</h3>
@@ -565,25 +653,6 @@ onMounted(async () => {
           </span>
         </div>
 
-        <p
-          v-if="!isApplyAllMode && modalNextPendingMigration"
-          class="form-help full-width"
-        >
-          Next to apply:
-          <strong>{{ modalNextPendingMigration }}</strong>
-        </p>
-
-        <div v-if="modalPendingMigrations === 0" class="modal-warning">
-          This environment is already up to date. There is no pending migration to apply.
-        </div>
-
-        <div
-          v-if="getApplyBlockedReason(applyForm.environment)"
-          class="modal-warning"
-        >
-          {{ getApplyBlockedReason(applyForm.environment) }}
-        </div>
-
         <form class="execution-form" @submit.prevent="submitApplyMigrations">
           <label>
             Environment
@@ -592,7 +661,7 @@ onMounted(async () => {
                 v-for="environment in environmentNames"
                 :key="environment"
                 :value="environment"
-                :disabled="!canApplyEnvironment(environment)"
+                :disabled="!canApplyAnyMode(environment)"
               >
                 {{ environment }}
               </option>
@@ -604,46 +673,42 @@ onMounted(async () => {
             <input v-model="applyForm.requestedBy" type="text" disabled />
           </label>
 
-          <div class="full-width execution-mode-group">
+          <div class="full-width execution-mode-group compact">
             <span class="field-title">Execution Mode</span>
 
-            <label
-              v-for="option in executionModeOptions"
-              :key="option.value"
-              class="execution-mode-option"
-              :class="{ active: applyForm.executionMode === option.value }"
+            <div class="execution-mode-toggle">
+              <button
+                v-for="option in executionModeOptions"
+                :key="option.value"
+                type="button"
+                class="execution-mode-button"
+                :class="{
+                  active: applyForm.executionMode === option.value,
+                  disabled: !canSelectExecutionMode(option.value)
+                }"
+                :disabled="!canSelectExecutionMode(option.value)"
+                @click="selectExecutionMode(option.value)"
+              >
+                {{ option.title }}
+              </button>
+            </div>
+
+            <div
+              class="execution-mode-message"
+              :class="{ warning: selectedExecutionModeBlockedReason }"
             >
-              <input
-                v-model="applyForm.executionMode"
-                type="radio"
-                name="executionMode"
-                :value="option.value"
-                @change="handleExecutionModeChange"
-              />
-
-              <div>
-                <strong>{{ option.title }}</strong>
-                <span>{{ option.description }}</span>
-              </div>
-            </label>
-          </div>
-
-          <div
-            v-if="isApplyAllMode && modalPendingMigrations > 1"
-            class="modal-warning full-width"
-          >
-            Advanced mode selected. This will apply all
-            {{ modalPendingMigrations }} pending migrations in Liquibase order.
+              {{ executionModeHelpMessage }}
+            </div>
           </div>
 
           <label class="full-width">
             Reason
-            <textarea v-model="applyForm.reason" rows="4"></textarea>
+            <textarea v-model="applyForm.reason" rows="3"></textarea>
           </label>
 
           <p class="form-help full-width">
-            This action queues a controlled Liquibase update. The backend validates the selected
-            execution mode, applies changesets in Liquibase order, and stores execution logs.
+            The backend validates the selected mode, applies changesets in Liquibase order,
+            and stores execution logs.
           </p>
 
           <div class="modal-actions">

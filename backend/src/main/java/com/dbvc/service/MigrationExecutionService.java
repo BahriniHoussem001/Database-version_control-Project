@@ -40,7 +40,7 @@ public class MigrationExecutionService {
         String requestedBy = cleanText(request.getRequestedBy());
 
         if ("UPDATE".equals(requestType)) {
-            environmentPromotionPolicyService.assertCanApply(environment);
+            environmentPromotionPolicyService.assertCanApply(environment, executionMode);
         }
 
         if (requestedBy == null) {
@@ -174,6 +174,15 @@ public class MigrationExecutionService {
 
         try {
             String validationSummary = validateBeforeExecution(request);
+
+            String refreshedCommand = resolveCommand(
+                    request.getEnvironment(),
+                    request.getRequestType(),
+                    request.getExecutionMode()
+            );
+
+            request.setCommand(refreshedCommand);
+            updateCommand(nextRequestId, refreshedCommand);
 
             LiquibaseExecutionResult result = executeRequest(request);
 
@@ -503,13 +512,33 @@ public class MigrationExecutionService {
         );
     }
 
+    private void updateCommand(Long id, String command) {
+        jdbcTemplate.update(
+                """
+                UPDATE migration_execution_request
+                SET command = ?
+                WHERE id = ?
+                """,
+                command,
+                id
+        );
+    }
+
     private String validateBeforeExecution(MigrationExecutionResponse request) {
         if (!"UPDATE".equals(request.getRequestType())) {
             return "No validation required for request type: " + request.getRequestType()
                     + " on environment: " + request.getEnvironment();
         }
 
-        environmentPromotionPolicyService.assertCanApply(request.getEnvironment());
+        environmentPromotionPolicyService.assertCanApply(
+                request.getEnvironment(),
+                request.getExecutionMode()
+        );
+
+        int allowedUpdateCount = environmentPromotionPolicyService.resolveAllowedUpdateCount(
+                request.getEnvironment(),
+                request.getExecutionMode()
+        );
 
         List<MigrationValidationResult> validationResults =
                 migrationValidationService.validatePendingMigrationsByEnvironment(request.getEnvironment());
@@ -520,43 +549,33 @@ public class MigrationExecutionService {
             );
         }
 
-        if ("NEXT".equals(request.getExecutionMode())) {
-            MigrationValidationResult nextPendingMigration = validationResults.get(0);
+        List<MigrationValidationResult> migrationsToValidate = validationResults
+                .stream()
+                .limit(allowedUpdateCount)
+                .toList();
 
-            if (!"VALID".equals(nextPendingMigration.getStatus())) {
-                throw new IllegalStateException(
-                        "Next pending migration validation failed for environment: "
-                                + request.getEnvironment()
-                                + ". Please check /api/environments/"
-                                + request.getEnvironment()
-                                + "/migrations/pending/validation before applying."
-                );
-            }
-
-            return "Validation passed before execution for environment: "
-                    + request.getEnvironment()
-                    + ". Execution mode: NEXT pending migration only. "
-                    + "Total pending migrations at validation time: "
-                    + validationResults.size();
-        }
-
-        boolean hasValidationProblems = validationResults.stream()
+        boolean hasValidationProblems = migrationsToValidate.stream()
                 .anyMatch(result -> !"VALID".equals(result.getStatus()));
 
         if (hasValidationProblems) {
             throw new IllegalStateException(
                     "Migration validation failed for environment: "
                             + request.getEnvironment()
+                            + ". Execution mode: "
+                            + request.getExecutionMode()
                             + ". Please check /api/environments/"
                             + request.getEnvironment()
-                            + "/migrations/pending/validation before applying all pending migrations."
+                            + "/migrations/pending/validation before applying."
             );
         }
 
         return "Validation passed before execution for environment: "
                 + request.getEnvironment()
-                + ". Execution mode: ALL pending migrations. "
-                + "Pending changesets checked: "
+                + ". Execution mode: "
+                + request.getExecutionMode()
+                + ". Allowed promoted migrations to apply: "
+                + allowedUpdateCount
+                + ". Total pending migrations at validation time: "
                 + validationResults.size();
     }
 
@@ -641,11 +660,15 @@ public class MigrationExecutionService {
         String defaultsFile = resolveEnvironmentDefaultsFile(environment);
 
         if ("UPDATE".equals(requestType)) {
-            if ("ALL".equals(executionMode)) {
-                return "docker compose run --rm liquibase --defaults-file=" + defaultsFile + " update";
-            }
+            int allowedUpdateCount = environmentPromotionPolicyService.resolveAllowedUpdateCount(
+                    environment,
+                    executionMode
+            );
 
-            return "docker compose run --rm liquibase --defaults-file=" + defaultsFile + " update-count --count=1";
+            return "docker compose run --rm liquibase --defaults-file="
+                    + defaultsFile
+                    + " update-count --count="
+                    + allowedUpdateCount;
         }
 
         if ("ROLLBACK".equals(requestType)) {

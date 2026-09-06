@@ -1082,3 +1082,86 @@ td {
   font-size: 0.84rem;
   line-height: 1.45;
 }
+.execution-mode-option.disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+  background: #f8fafc;
+}
+
+.execution-mode-option.disabled:hover {
+  border-color: #dbe3ef;
+  background: #f8fafc;
+}
+
+.mode-blocked-message {
+  display: block;
+  margin-top: 0.5rem;
+  color: #b45309;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+.compact-apply-modal {
+  max-height: 92vh;
+  overflow-y: auto;
+}
+
+.execution-mode-group.compact {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.execution-mode-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+}
+
+.execution-mode-button {
+  border: 1px solid #dbe3ef;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #334155;
+  padding: 0.8rem 0.9rem;
+  font-size: 0.92rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.execution-mode-button:hover:not(:disabled) {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.execution-mode-button.active {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+}
+
+.execution-mode-button.disabled,
+.execution-mode-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  background: #f8fafc;
+  color: #94a3b8;
+}
+
+.execution-mode-message {
+  padding: 0.75rem 0.9rem;
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 0.86rem;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.execution-mode-message.warning {
+  background: #fff7ed;
+  color: #b45309;
+  border: 1px solid #fed7aa;
+}
