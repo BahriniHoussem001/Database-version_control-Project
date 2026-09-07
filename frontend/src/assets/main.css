@@ -1219,3 +1219,59 @@ td {
   font-size: 0.82rem;
   font-weight: 700;
 }
+
+.artifact-actions {
+  margin-top: 0.55rem;
+}
+
+.small-button {
+  padding: 0.45rem 0.75rem;
+  font-size: 0.78rem;
+  border-radius: 9px;
+}
+
+.log-preview-modal {
+  width: min(920px, 94vw);
+  max-height: 92vh;
+  overflow-y: auto;
+}
+
+.artifact-preview-meta {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.9rem;
+  margin-bottom: 1rem;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.artifact-preview-meta div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.artifact-preview-meta span {
+  font-size: 0.78rem;
+  color: #64748b;
+  font-weight: 700;
+}
+
+.artifact-preview-meta strong,
+.artifact-preview-meta code {
+  font-size: 0.84rem;
+  color: #0f172a;
+  word-break: break-all;
+}
+
+.log-preview-content {
+  max-height: 52vh;
+  overflow: auto;
+  padding: 1rem;
+  border-radius: 12px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}

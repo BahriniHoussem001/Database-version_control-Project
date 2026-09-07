@@ -4,8 +4,11 @@ import com.dbvc.dto.ArtifactStorageHealthResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
@@ -61,6 +64,8 @@ public class ArtifactStorageService {
             return null;
         }
 
+        validateObjectKey(objectKey);
+
         PutObjectRequest putObjectRequest = PutObjectRequest.builder()
                 .bucket(bucket)
                 .key(objectKey)
@@ -75,7 +80,44 @@ public class ArtifactStorageService {
         return objectKey;
     }
 
+    public String readTextArtifact(String artifactBucket, String objectKey) {
+        if (!enabled) {
+            throw new IllegalStateException("Artifact storage is disabled.");
+        }
+
+        String resolvedBucket = cleanBucket(artifactBucket);
+        validateObjectKey(objectKey);
+
+        GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                .bucket(resolvedBucket)
+                .key(objectKey)
+                .build();
+
+        ResponseBytes<GetObjectResponse> responseBytes =
+                artifactS3Client.getObjectAsBytes(getObjectRequest);
+
+        return responseBytes.asString(StandardCharsets.UTF_8);
+    }
+
     public String getBucket() {
         return bucket;
+    }
+
+    private String cleanBucket(String artifactBucket) {
+        if (artifactBucket == null || artifactBucket.isBlank()) {
+            return bucket;
+        }
+
+        return artifactBucket.trim();
+    }
+
+    private void validateObjectKey(String objectKey) {
+        if (objectKey == null || objectKey.isBlank()) {
+            throw new IllegalArgumentException("Artifact object key is required.");
+        }
+
+        if (objectKey.startsWith("/") || objectKey.contains("..")) {
+            throw new IllegalArgumentException("Invalid artifact object key.");
+        }
     }
 }

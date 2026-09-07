@@ -81,3 +81,9 @@ export function getEnvironmentPromotionStatus() {
 export function createGeneratedMigration(payload) {
   return api.post('/generated-migrations', payload)
 }
+
+export function getMigrationExecutionArtifactLog(id) {
+  return api.get(`/migration-executions/${id}/artifact-log`, {
+    responseType: 'text',
+  })
+}

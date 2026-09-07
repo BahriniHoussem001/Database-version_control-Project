@@ -1,11 +1,20 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { RefreshCw } from 'lucide-vue-next'
-import { getMigrationExecutions } from '../services/api'
+import {
+  getMigrationExecutionArtifactLog,
+  getMigrationExecutions,
+} from '../services/api'
 
 const loading = ref(false)
 const errorMessage = ref(null)
 const executions = ref([])
+
+const showPreviewModal = ref(false)
+const previewLoading = ref(false)
+const previewError = ref(null)
+const previewContent = ref('')
+const selectedExecution = ref(null)
 
 const totalExecutions = computed(() => executions.value.length)
 
@@ -72,6 +81,42 @@ async function loadExecutions() {
   } finally {
     loading.value = false
   }
+}
+
+async function openLogPreview(execution) {
+  if (!hasLogArtifact(execution)) {
+    return
+  }
+
+  selectedExecution.value = execution
+  showPreviewModal.value = true
+  previewLoading.value = true
+  previewError.value = null
+  previewContent.value = ''
+
+  try {
+    const response = await getMigrationExecutionArtifactLog(execution.id)
+    previewContent.value =
+      typeof response.data === 'string'
+        ? response.data
+        : JSON.stringify(response.data, null, 2)
+  } catch (error) {
+    previewError.value =
+      error.response?.data?.message ||
+      error.response?.data?.error ||
+      error.message ||
+      'Unable to preview archived execution log'
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+function closeLogPreview() {
+  showPreviewModal.value = false
+  selectedExecution.value = null
+  previewContent.value = ''
+  previewError.value = null
+  previewLoading.value = false
 }
 
 onMounted(loadExecutions)
@@ -191,6 +236,16 @@ onMounted(loadExecutions)
                     <span>Object key</span>
                     <code>{{ execution.logArtifactKey }}</code>
                   </div>
+
+                  <div class="artifact-actions">
+                    <button
+                      type="button"
+                      class="secondary-button small-button"
+                      @click="openLogPreview(execution)"
+                    >
+                      Preview Log
+                    </button>
+                  </div>
                 </div>
 
                 <div v-else class="log-artifact-empty">
@@ -203,9 +258,58 @@ onMounted(loadExecutions)
       </div>
 
       <p class="form-help">
-        The MinIO bucket is private. This page shows the archived log location only.
-        A download or preview action can be added later through a backend endpoint.
+        The MinIO bucket is private. The preview button reads the archived log through the backend.
       </p>
     </article>
+
+    <div v-if="showPreviewModal" class="modal-backdrop">
+      <div class="modal-card log-preview-modal">
+        <div class="modal-header">
+          <div>
+            <h3>
+              Execution Log Preview
+              <span v-if="selectedExecution">#{{ selectedExecution.id }}</span>
+            </h3>
+            <p v-if="selectedExecution">
+              {{ selectedExecution.environment }} ·
+              {{ executionActionLabel(selectedExecution.requestType, selectedExecution.executionMode) }}
+            </p>
+          </div>
+
+          <button class="icon-button" @click="closeLogPreview">×</button>
+        </div>
+
+        <div v-if="previewLoading" class="loading-banner">
+          Loading archived log from MinIO...
+        </div>
+
+        <div v-if="previewError" class="error-banner">
+          {{ previewError }}
+        </div>
+
+        <div
+          v-if="selectedExecution?.logArtifactBucket && selectedExecution?.logArtifactKey"
+          class="artifact-preview-meta"
+        >
+          <div>
+            <span>Bucket</span>
+            <strong>{{ selectedExecution.logArtifactBucket }}</strong>
+          </div>
+
+          <div>
+            <span>Object key</span>
+            <code>{{ selectedExecution.logArtifactKey }}</code>
+          </div>
+        </div>
+
+        <pre v-if="previewContent" class="log-preview-content">{{ previewContent }}</pre>
+
+        <div class="modal-actions">
+          <button type="button" class="secondary-button" @click="closeLogPreview">
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
   </section>
 </template>
