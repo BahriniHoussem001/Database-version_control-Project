@@ -87,3 +87,6 @@ export function getMigrationExecutionArtifactLog(id) {
     responseType: 'text',
   })
 }
+export function getArtifactStorageHealth() {
+  return api.get('/artifact-storage/health')
+}
