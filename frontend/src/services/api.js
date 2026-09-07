@@ -90,3 +90,8 @@ export function getMigrationExecutionArtifactLog(id) {
 export function getArtifactStorageHealth() {
   return api.get('/artifact-storage/health')
 }
+export function getGeneratedMigrationArtifact(filename) {
+  return api.get(`/generated-migrations/${encodeURIComponent(filename)}/artifact`, {
+    responseType: 'text',
+  })
+}
