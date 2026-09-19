@@ -31,6 +31,9 @@ public class MigrationExecutionService {
     @Value("${dbvc.project-root}")
     private String projectRoot;
 
+    @Value("${dbvc.liquibase.command-mode:docker}")
+    private String liquibaseCommandMode;
+
     public MigrationExecutionResponse createExecutionRequest(CreateMigrationExecutionRequest request) {
         String environment = normalizeEnvironment(request.getEnvironment());
         String requestType = normalizeRequestType(request.getRequestType());
@@ -609,11 +612,7 @@ public class MigrationExecutionService {
 
     private LiquibaseExecutionResult runCommand(String command) {
         try {
-            ProcessBuilder processBuilder = new ProcessBuilder(
-                    "cmd.exe",
-                    "/c",
-                    command
-            );
+            ProcessBuilder processBuilder = createProcessBuilder(command);
 
             processBuilder.directory(new File(projectRoot));
             processBuilder.redirectErrorStream(true);
@@ -643,6 +642,22 @@ public class MigrationExecutionService {
         }
     }
 
+    private ProcessBuilder createProcessBuilder(String command) {
+        if (isDirectLiquibaseCommandMode()) {
+            return new ProcessBuilder(
+                    "sh",
+                    "-c",
+                    command
+            );
+        }
+
+        return new ProcessBuilder(
+                "cmd.exe",
+                "/c",
+                command
+        );
+    }
+
     private boolean isRollbackTouchingProtectedTables(String rollbackPreviewOutput) {
         if (rollbackPreviewOutput == null) {
             return false;
@@ -658,6 +673,7 @@ public class MigrationExecutionService {
 
     private String resolveCommand(String environment, String requestType, String executionMode) {
         String defaultsFile = resolveEnvironmentDefaultsFile(environment);
+        String liquibaseCommandPrefix = resolveLiquibaseCommandPrefix();
 
         if ("UPDATE".equals(requestType)) {
             int allowedUpdateCount = environmentPromotionPolicyService.resolveAllowedUpdateCount(
@@ -665,14 +681,18 @@ public class MigrationExecutionService {
                     executionMode
             );
 
-            return "docker compose run --rm liquibase --defaults-file="
+            return liquibaseCommandPrefix
+                    + " --defaults-file="
                     + defaultsFile
                     + " update-count --count="
                     + allowedUpdateCount;
         }
 
         if ("ROLLBACK".equals(requestType)) {
-            return "docker compose run --rm liquibase --defaults-file=" + defaultsFile + " rollback-count --count=1";
+            return liquibaseCommandPrefix
+                    + " --defaults-file="
+                    + defaultsFile
+                    + " rollback-count --count=1";
         }
 
         throw new IllegalArgumentException("Unsupported requestType: " + requestType);
@@ -680,10 +700,41 @@ public class MigrationExecutionService {
 
     private String resolveRollbackPreviewCommand(String environment) {
         String defaultsFile = resolveEnvironmentDefaultsFile(environment);
+        String liquibaseCommandPrefix = resolveLiquibaseCommandPrefix();
 
-        return "docker compose run --rm liquibase --defaults-file="
+        return liquibaseCommandPrefix
+                + " --defaults-file="
                 + defaultsFile
                 + " rollback-count-sql --count=1";
+    }
+
+    private String resolveLiquibaseCommandPrefix() {
+        if (isDirectLiquibaseCommandMode()) {
+            return "liquibase";
+        }
+
+        return "docker compose run --rm liquibase";
+    }
+
+    private boolean isDirectLiquibaseCommandMode() {
+        String mode = normalizeLiquibaseCommandMode();
+        return "DIRECT".equals(mode);
+    }
+
+    private String normalizeLiquibaseCommandMode() {
+        String value = cleanText(liquibaseCommandMode);
+
+        if (value == null) {
+            return "DOCKER";
+        }
+
+        value = value.toUpperCase();
+
+        if (!"DOCKER".equals(value) && !"DIRECT".equals(value)) {
+            throw new IllegalArgumentException("dbvc.liquibase.command-mode must be docker or direct");
+        }
+
+        return value;
     }
 
     private String resolveEnvironmentDefaultsFile(String environment) {
@@ -785,7 +836,7 @@ public class MigrationExecutionService {
         );
     }
 
-    private java.time.LocalDateTime toLocalDateTime(Timestamp timestamp) {
+    private LocalDateTime toLocalDateTime(Timestamp timestamp) {
         return timestamp != null ? timestamp.toLocalDateTime() : null;
     }
 
